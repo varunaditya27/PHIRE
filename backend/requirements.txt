@@ -1,0 +1,22 @@
+# PHIRE backend dependencies. Pin exact versions before first install.
+
+# --- Web framework ---
+fastapi
+uvicorn[standard]
+
+# --- Database (PostgreSQL, via SQLAlchemy ORM) ---
+sqlalchemy
+psycopg2-binary
+alembic
+
+# --- Validation / settings ---
+pydantic
+pydantic-settings
+
+# --- Document processing / OCR (see app/services/document_processor.py) ---
+# docling            # primary PDF/table extraction
+# pymupdf            # fallback PDF extraction
+# pytesseract        # OCR for scanned/image reports
+
+# Note: LLM, embedding, and vector-store client libraries live in
+# ml/requirements.txt — the backend only orchestrates, it doesn't run models.
