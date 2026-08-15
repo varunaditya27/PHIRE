@@ -1,0 +1,6 @@
+# Compose-driven build for the FastAPI backend service.
+# Referenced by docker/docker-compose.yml's `backend` service (build context:
+# ../backend, dockerfile: docker/Dockerfile.backend). See backend/Dockerfile
+# for the standalone single-service equivalent — keep the two in sync.
+#
+# Not yet implemented — placeholder only.

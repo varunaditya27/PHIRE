@@ -1,0 +1,29 @@
+# PHIRE service orchestration (local development).
+#
+# NOTE: the actual entrypoint used by `docker-compose up -d` (per
+# README.md / GET_STARTED.md, run from the repo root) is the root-level
+# ../docker-compose.yml. This file documents the same planned services for
+# reference alongside the Dockerfiles that live in this directory — keep
+# the two in sync until one is retired.
+#
+# Planned services:
+#   - postgres   : PostgreSQL — port 5432. Relational store for
+#                  observations, claims, timeline, and audit logs.
+#   - ollama     : local LLM inference — port 11434. Model configurable,
+#                  default medgemma:8b-q4_0 (~4GB), alternatives
+#                  qwen2:7b-instruct-q4_0 / meditron:7b-q4_0.
+#   - backend    : FastAPI app — port 8000 (build: ./Dockerfile.backend,
+#                  context: ../backend).
+#   - frontend   : Next.js app — port 3000 (build: ./Dockerfile.frontend,
+#                  context: ../frontend).
+#   - nginx      : reverse proxy in front of frontend/backend (optional,
+#                  see nginx.conf).
+#
+# Chroma is deliberately NOT a service here — it runs in-process from
+# Python (see ml/rag/retriever.py) as PHIRE's vector store for RAG; only
+# add a container for it if that changes.
+#
+# Privacy constraint: no service in this file may call out to external/
+# cloud APIs — all inference and storage must stay on the local network.
+#
+# Not yet implemented — placeholder only.

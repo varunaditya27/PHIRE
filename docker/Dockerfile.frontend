@@ -1,0 +1,8 @@
+# Compose-driven build for the Next.js frontend service.
+# Referenced by docker/docker-compose.yml's `frontend` service (build
+# context: ../frontend, dockerfile: docker/Dockerfile.frontend).
+#
+# Planned: multi-stage build (deps -> build -> run), served via `next start`
+# on port 3000. Server components keep PHI server-side per README.md.
+#
+# Not yet implemented — placeholder only.
