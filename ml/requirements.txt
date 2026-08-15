@@ -1,0 +1,16 @@
+# PHIRE ML layer dependencies. Pin exact versions before first install.
+
+# --- LLM orchestration ---
+langchain
+
+# --- Embeddings / retrieval ---
+sentence-transformers
+rank-bm25
+chromadb             # in-process vector store for RAG (PHIRE's default)
+
+# --- Claim verification ---
+# medragchecker      # or equivalent NLI-based entailment checker
+
+# --- ML frameworks (recommendations) ---
+# torch
+# scikit-learn
