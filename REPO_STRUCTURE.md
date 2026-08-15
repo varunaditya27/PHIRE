@@ -7,7 +7,6 @@ phire/
 ├── README.md
 ├── CONTRIBUTING.md
 ├── GET_STARTED.md
-├── LICENSE
 ├── CHANGELOG.md
 │
 ├── docs/
@@ -28,7 +27,10 @@ phire/
 │   │   │   ├── router_observations.py # GET /api/patient/*/observations
 │   │   │   ├── router_chat.py        # POST /api/chat
 │   │   │   ├── router_search.py      # GET /api/search/*
-│   │   │   └── router_health.py      # POST /api/health
+│   │   │   ├── router_health.py      # POST /api/health
+│   │   │   ├── router_evidence.py    # POST /api/evidence/retrieve, /verify
+│   │   │   ├── router_claims.py      # POST /api/claims/extract
+│   │   │   └── router_recommendations.py # GET /api/recommendations/*
 │   │   │
 │   │   ├── models/                 # Pydantic schemas
 │   │   │   ├── document.py

@@ -156,12 +156,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 ---
 
-## ⚖️ License
-
-Apache License 2.0 - See [LICENSE](LICENSE)
-
----
-
 ## ⚠️ Disclaimer
 
 **PHIRE is NOT a medical device and NOT a substitute for professional medical advice.**

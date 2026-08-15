@@ -1,0 +1,29 @@
+# Root .gitignore — covers backend (Python), ml (Python), and shared
+# artifacts. frontend/ has its own .gitignore for Node/Next.js-specific
+# patterns.
+
+# --- Environment ---
+.env
+*.env.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Docker ---
+*.log
+
+# --- Local model / data caches ---
+.ollama/
+*.gguf
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
