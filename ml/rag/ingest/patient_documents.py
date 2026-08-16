@@ -1,21 +1,21 @@
 """
 Text extraction from patient-uploaded documents.
 
-Pluggable by design: PDFTextExtractor handles v1 scope (text-based PDFs).
-An OCR-based extractor for scanned/photographed documents — people
-uploading a phone photo of a hard-copy report rather than an actual PDF is
-a real, expected case — is the next TextExtractor implementation to add,
-without touching the ingestion pipeline around it (ingest_patient_document.py
-only calls extract_text, never a concrete extractor class directly). Model
-choice is already benchmarked and decided: olmOCR-v2 (2-7B-1025) at
-Q4_K_M, run locally via Ollama — see experiments/RESULTS.md. Not yet wired
-in as an actual extractor class here.
+Pluggable by design: PDFTextExtractor handles text-based PDFs;
+OCRTextExtractor (ml/rag/ingest/ocr.py) handles scanned/photographed
+images via olmOCR-v2 run locally through Ollama — model choice
+benchmarked in experiments/RESULTS.md, not assumed. Adding another format
+later means adding another TextExtractor to DEFAULT_EXTRACTORS, without
+touching the ingestion pipeline around it (ingest_patient_document.py only
+calls extract_text, never a concrete extractor class directly).
 """
 
 from pathlib import Path
 from typing import Protocol
 
 import pypdf
+
+from ml.rag.ingest.ocr import OCRTextExtractor
 
 
 class TextExtractor(Protocol):
@@ -28,12 +28,15 @@ class TextExtractor(Protocol):
 class PDFTextExtractor:
     """Extracts embedded text from text-based PDFs via pypdf.
 
-    Does not perform OCR — a scanned/photographed PDF with no embedded
-    text layer extracts as empty or near-empty text. That's a real
-    limitation, surfaced explicitly by returning "" rather than silently
-    indexing garbage — see ingest_patient_document.py's handling of an
-    empty extraction result. An OCR extractor (olmOCR-v2, per
-    experiments/RESULTS.md) is the planned fix, not yet implemented.
+    Does not perform OCR — a scanned/photographed PDF (embedded images,
+    no text layer) extracts as empty or near-empty text. extract_text()
+    routes purely on file extension, matching this extractor first for
+    any .pdf regardless of content, so a scanned PDF does NOT fall
+    through to OCRTextExtractor (which only supports raw image formats —
+    see its SUPPORTED_SUFFIXES) — that combination is a known gap, not
+    yet handled by either extractor. Surfaced explicitly by returning ""
+    rather than silently indexing garbage — see
+    ingest_patient_document.py's handling of an empty extraction result.
     """
 
     def supports(self, file_path: Path) -> bool:
@@ -44,7 +47,7 @@ class PDFTextExtractor:
         return "\n\n".join(page.extract_text() or "" for page in reader.pages).strip()
 
 
-DEFAULT_EXTRACTORS: list[TextExtractor] = [PDFTextExtractor()]
+DEFAULT_EXTRACTORS: list[TextExtractor] = [PDFTextExtractor(), OCRTextExtractor()]
 
 
 def extract_text(file_path: Path, extractors: list[TextExtractor] | None = None) -> str:

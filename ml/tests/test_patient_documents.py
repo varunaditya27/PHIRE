@@ -34,4 +34,4 @@ def test_extract_text_routes_to_matching_extractor():
 
 def test_extract_text_raises_for_unsupported_format():
     with pytest.raises(ValueError, match="No extractor"):
-        extract_text(Path("photo.jpg"))
+        extract_text(Path("report.docx"))

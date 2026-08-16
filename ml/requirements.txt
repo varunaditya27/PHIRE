@@ -23,8 +23,10 @@ pillow==12.3.0        # image preprocessing for the OCR extractor + eval fixture
 
 # --- Graph RAG (longitudinal + relational retrieval, see
 #     docs/DATASETS_AND_GRAPH_RAG.md) ---
-# lightrag-hku       # Ollama-native local graph extraction/retrieval
-# neo4j              # driver for the Neo4j-backed entity/relationship graph
+neo4j==6.2.0          # driver for the Neo4j-backed Longitudinal Health Graph (ml/graph/)
+# lightrag-hku       # Ollama-native LLM entity/relationship extraction — not
+                     # needed yet; ml/graph/observations.py extracts
+                     # deterministically from table_parsing.py instead
 
 # --- Claim verification: implemented via facebook/bart-large-mnli
 #     (transformers, already pinned above) — see
