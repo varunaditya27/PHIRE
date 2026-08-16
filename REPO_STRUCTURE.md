@@ -15,7 +15,7 @@ phire/
 │   ├── OPEN_SOURCE_TOOLS.md        # 40+ integrated tools & frameworks
 │   └── DATASETS_AND_GRAPH_RAG.md   # Finalized datasets/models + graph RAG architecture
 │
-├── backend/                         # VARUN OWNS
+├── backend/                         # ANIKA OWNS
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                 # FastAPI app entry
@@ -60,7 +60,7 @@ phire/
 │   ├── Dockerfile
 │   └── .env.example
 │
-├── frontend/                        # VARUN OWNS
+├── frontend/                        # SHASHWATI OWNS
 │   ├── app/
 │   │   ├── layout.tsx              # Root layout (auth, theme)
 │   │   ├── page.tsx                # Home page
@@ -118,14 +118,15 @@ phire/
 │   ├── Dockerfile
 │   └── .env.example
 │
-├── ml/                              # ANIKA OWNS
+├── ml/                              # VARUN OWNS
 │   ├── __init__.py
 │   │
 │   ├── rag/
 │   │   ├── __init__.py
 │   │   ├── retriever.py            # Chroma + BM25 retrieval
 │   │   ├── reranker.py             # Evidence ranking
-│   │   └── embeddings.py           # Embedding pipeline
+│   │   ├── embeddings.py           # Embedding pipeline
+│   │   └── experiments/            # Model-selection benchmarks (see RESULTS.md)
 │   │
 │   ├── claims/
 │   │   ├── __init__.py
