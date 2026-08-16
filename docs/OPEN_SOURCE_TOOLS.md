@@ -183,13 +183,36 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 - **PHIRE Role**: Fallback if Docling unavailable
 - **Why PHIRE**: Fast, lightweight
 
-**14. Tesseract OCR**
+**14. Tesseract OCR** — *superseded, see below*
 - **GitHub**: [UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki)
 - **License**: Apache 2.0
 - **Functionality**: Text extraction from image-based PDFs
-- **PHIRE Role**: Scanned medical documents
+- **PHIRE Role**: Originally proposed for scanned medical documents;
+  **superseded by olmOCR-v2** (below) — a benchmark
+  (`ml/rag/ingest/experiments/RESULTS.md`) found it substantially more
+  accurate on structured clinical documents (tables, mixed layouts) than
+  classic character-recognition OCR, while remaining fully local via
+  Ollama. Kept here for reference, not the active choice.
 - **Integration**: Docker container or system package
-- **Why PHIRE**: Common for older medical reports
+- **Why PHIRE**: Common for older medical reports; character-recognition-only, no layout/table understanding
+
+**14a. olmOCR-v2 (Allen AI)** — *finalized choice for patient document OCR*
+- **HuggingFace**: [allenai/olmOCR-2-7B-1025](https://huggingface.co/allenai/olmOCR-2-7B-1025)
+- **License**: Apache 2.0
+- **Functionality**: Vision-language model fine-tuned for document-to-text
+  conversion — understands page layout, tables (converts to HTML), and
+  mixed prose/list content, not just character recognition
+- **PHIRE Role**: OCR extractor for `ml/rag/ingest/patient_documents.py`
+  (scanned/photographed patient documents PDFTextExtractor can't handle)
+- **Deployment**: Runs locally via Ollama (Q4_K_M quantization,
+  `bartowski`'s GGUF build, ~6GB), consistent with PHIRE's existing
+  Ollama-based local-LLM pattern
+- **Why PHIRE**: Benchmarked against olmOCR-v1 and Q8_0 quantization
+  across 4 candidates, 12 test images (grid tables, two-column layout,
+  narrative prose, clean + simulated phone-photo variants) —
+  content-normalized CER 0.012 (vs v1's 0.11-0.14) and perfect field-level
+  accuracy on all clinically critical values. See
+  `ml/rag/ingest/experiments/RESULTS.md` for full methodology and results.
 
 ---
 

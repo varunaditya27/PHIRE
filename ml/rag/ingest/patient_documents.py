@@ -1,7 +1,15 @@
 """
 Text extraction from patient-uploaded documents.
 
-Pluggable by design: PDFTextExtractor handles today's v1 scope (text-based PDFs). An OCR-based extractor for scanned/photographed documents — people uploading a phone photo of a hard-copy report rather than an actual PDF is a real, expected case — can be added later as another TextExtractor implementation without touching the ingestion pipeline around it (ingest_patient_document.py only calls extract_text, never a concrete extractor class directly).
+Pluggable by design: PDFTextExtractor handles v1 scope (text-based PDFs).
+An OCR-based extractor for scanned/photographed documents — people
+uploading a phone photo of a hard-copy report rather than an actual PDF is
+a real, expected case — is the next TextExtractor implementation to add,
+without touching the ingestion pipeline around it (ingest_patient_document.py
+only calls extract_text, never a concrete extractor class directly). Model
+choice is already benchmarked and decided: olmOCR-v2 (2-7B-1025) at
+Q4_K_M, run locally via Ollama — see experiments/RESULTS.md. Not yet wired
+in as an actual extractor class here.
 """
 
 from pathlib import Path
@@ -20,7 +28,12 @@ class TextExtractor(Protocol):
 class PDFTextExtractor:
     """Extracts embedded text from text-based PDFs via pypdf.
 
-    Does not perform OCR — a scanned/photographed PDF with no embedded text layer extracts as empty or near-empty text. That's a real v1 limitation (OCR tooling is scoped for Month 2-6 per docs/OPEN_SOURCE_TOOLS.md, not MVP), surfaced explicitly by returning "" rather than silently indexing garbage — see ingest_patient_document.py's handling of an empty extraction result.
+    Does not perform OCR — a scanned/photographed PDF with no embedded
+    text layer extracts as empty or near-empty text. That's a real
+    limitation, surfaced explicitly by returning "" rather than silently
+    indexing garbage — see ingest_patient_document.py's handling of an
+    empty extraction result. An OCR extractor (olmOCR-v2, per
+    experiments/RESULTS.md) is the planned fix, not yet implemented.
     """
 
     def supports(self, file_path: Path) -> bool:
