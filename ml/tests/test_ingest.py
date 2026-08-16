@@ -9,7 +9,7 @@ when actually ingesting).
 
 import xml.etree.ElementTree as ElementTree
 
-from ml.rag.ingest.chunking import chunk_text
+from ml.rag.ingest.chunking import chunk_text, locate_chunk_offsets
 from ml.rag.ingest.medlineplus import _strip_html
 from ml.rag.ingest.pubmed import _extract_pub_date
 from ml.rag.ingest.usda import _closeness_key, _core_term
@@ -34,6 +34,29 @@ def test_chunk_text_splits_long_text_on_paragraph_boundaries():
     assert len(chunks) > 1
     assert all(len(c) <= 150 for c in chunks)
     assert "".join(chunks).replace(" ", "") == text.replace("\n\n", " ").replace(" ", "")
+
+
+def test_locate_chunk_offsets_finds_each_chunk_in_order():
+    source = "First fact here. Second fact here. Third fact here."
+    chunks = ["First fact here.", "Second fact here.", "Third fact here."]
+
+    offsets = locate_chunk_offsets(source, chunks)
+
+    assert offsets == [(0, 16), (17, 34), (35, 51)]
+    for chunk, (start, end) in zip(chunks, offsets):
+        assert source[start:end] == chunk
+
+
+def test_locate_chunk_offsets_resolves_duplicate_text_to_successive_occurrences():
+    source = "Header\n\nHeader\n\nFooter"
+    offsets = locate_chunk_offsets(source, ["Header", "Header"])
+    assert offsets == [(0, 6), (8, 14)]
+
+
+def test_locate_chunk_offsets_returns_none_for_unmatched_chunk():
+    source = "Some source text."
+    offsets = locate_chunk_offsets(source, ["Some source text.", "not present anywhere"])
+    assert offsets == [(0, 17), None]
 
 
 def test_strip_html_removes_tags_and_unescapes_entities():

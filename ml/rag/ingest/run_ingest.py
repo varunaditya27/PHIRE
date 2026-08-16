@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ml.rag.ingest import medlineplus, pubmed, usda
-from ml.rag.ingest.chunking import chunk_text
+from ml.rag.ingest.chunking import chunk_text, locate_chunk_offsets
 from ml.rag.ingest.topics import CLINICAL_TOPICS, FOOD_QUERIES
 from ml.rag.retriever import Chunk, HybridRetriever
 
@@ -42,18 +42,18 @@ def _pubmed_chunks(topic_id: str, query: str) -> list[Chunk]:
     chunks = []
     for article in pubmed.fetch_topic_articles(query, PUBMED_RESULTS_PER_TOPIC):
         text = f"{article['title']}. {article['abstract']}"
-        for i, piece in enumerate(chunk_text(text)):
-            chunks.append(Chunk(
-                id=f"pubmed_{article['pmid']}_{i}",
-                text=piece,
-                metadata={
-                    "source": "pubmed",
-                    "topic": topic_id,
-                    "url": article["url"],
-                    "authority": PUBMED_AUTHORITY,
-                    **({"published_date": article["published_date"]} if article["published_date"] else {}),
-                },
-            ))
+        pieces = chunk_text(text)
+        for i, (piece, span) in enumerate(zip(pieces, locate_chunk_offsets(text, pieces))):
+            metadata = {
+                "source": "pubmed",
+                "topic": topic_id,
+                "url": article["url"],
+                "authority": PUBMED_AUTHORITY,
+                **({"published_date": article["published_date"]} if article["published_date"] else {}),
+            }
+            if span is not None:
+                metadata["char_start"], metadata["char_end"] = span
+            chunks.append(Chunk(id=f"pubmed_{article['pmid']}_{i}", text=piece, metadata=metadata))
     return chunks
 
 
@@ -62,15 +62,15 @@ def _medlineplus_chunks(topic_id: str, query: str) -> list[Chunk]:
     chunks = []
     for summary in medlineplus.fetch_topic_summaries(query, MEDLINEPLUS_RESULTS_PER_TOPIC):
         slug = summary["url"].rstrip("/").rsplit("/", 1)[-1].removesuffix(".html")
-        for i, piece in enumerate(chunk_text(summary["summary"])):
-            chunks.append(Chunk(
-                id=f"medlineplus_{slug}_{i}",
-                text=piece,
-                metadata={
-                    "source": "medlineplus", "topic": topic_id,
-                    "url": summary["url"], "authority": MEDLINEPLUS_AUTHORITY,
-                },
-            ))
+        pieces = chunk_text(summary["summary"])
+        for i, (piece, span) in enumerate(zip(pieces, locate_chunk_offsets(summary["summary"], pieces))):
+            metadata = {
+                "source": "medlineplus", "topic": topic_id,
+                "url": summary["url"], "authority": MEDLINEPLUS_AUTHORITY,
+            }
+            if span is not None:
+                metadata["char_start"], metadata["char_end"] = span
+            chunks.append(Chunk(id=f"medlineplus_{slug}_{i}", text=piece, metadata=metadata))
     return chunks
 
 

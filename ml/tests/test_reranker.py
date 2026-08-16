@@ -8,7 +8,7 @@ exercise the authority/recency/weighting logic in isolation.
 
 from datetime import date, timedelta
 
-from ml.rag.reranker import RECENCY_HALF_LIFE_DAYS, Reranker
+from ml.rag.reranker import AUTHORITY_WEIGHT, RECENCY_HALF_LIFE_DAYS, RECENCY_WEIGHT, RELEVANCE_WEIGHT, Reranker
 from ml.rag.retriever import Chunk
 
 
@@ -17,6 +17,9 @@ class StubReranker(Reranker):
 
     def __init__(self, relevance_scores: list[float]) -> None:
         self._relevance_scores_fixture = relevance_scores
+        self.relevance_weight = RELEVANCE_WEIGHT
+        self.authority_weight = AUTHORITY_WEIGHT
+        self.recency_weight = RECENCY_WEIGHT
 
     def _relevance_scores(self, query: str, chunks: list[Chunk]) -> list[float]:
         return self._relevance_scores_fixture
@@ -74,3 +77,23 @@ def test_rerank_respects_top_k():
 def test_rerank_returns_empty_for_no_chunks():
     reranker = StubReranker(relevance_scores=[])
     assert reranker.rerank("query", []) == []
+
+
+def test_custom_weights_change_ranking():
+    # Two chunks tied on relevance; only authority differs. Default
+    # weights should already favor the higher-authority chunk (already
+    # covered by test_rerank_lets_authority_and_recency_break_relevance_ties);
+    # this confirms the weights are actually instance-configurable, not
+    # just module constants baked into _combine.
+    chunks = [
+        Chunk(id="low_authority", text="x", metadata={"authority": 0.1}),
+        Chunk(id="high_authority", text="x", metadata={"authority": 0.9}),
+    ]
+    reranker = StubReranker(relevance_scores=[0.5, 0.5])
+    reranker.relevance_weight, reranker.authority_weight, reranker.recency_weight = 1.0, 0.0, 0.0
+
+    # With authority_weight=0, the two chunks' combined scores collapse
+    # to equal -- proves the weights are live instance state _combine
+    # actually reads, not module constants baked in at import time.
+    scores = {c.id: reranker._combine(0.5, c) for c in chunks}
+    assert scores["low_authority"] == scores["high_authority"] == 0.5

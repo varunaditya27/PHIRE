@@ -73,6 +73,37 @@ def chunk_ocr_text(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> list[str]:
     return chunks
 
 
+def locate_chunk_offsets(source_text: str, chunks: list[str]) -> list[tuple[int, int] | None]:
+    """Find each chunk's (start, end) character offset within source_text, in order.
+
+    Enables citing the exact span a claim's evidence came from (see
+    ml/chains/qa_chain.py's VerifiedClaim.source_span) — the same idea as
+    LangExtract's grounding (evaluated in ml/graph/experiments/RESULTS.md
+    for a different use case), implemented directly rather than adding
+    that dependency here.
+
+    Searches forward from the end of the previous match, so repeated text
+    (e.g. a duplicated header line) resolves to successive occurrences
+    instead of the same one repeatedly. Returns None for a chunk that
+    isn't found verbatim — table-row chunks (table_parsing.flatten_row)
+    are reformatted ("Label: Value, ..."), not extracted verbatim, so they
+    have no single matching span in source_text; documented gap, not a
+    silent wrong answer.
+    """
+    offsets: list[tuple[int, int] | None] = []
+    search_from = 0
+    for chunk in chunks:
+        index = source_text.find(chunk, search_from)
+        if index == -1:
+            index = source_text.find(chunk)
+        if index == -1:
+            offsets.append(None)
+            continue
+        offsets.append((index, index + len(chunk)))
+        search_from = index + len(chunk)
+    return offsets
+
+
 def _chunk_plain_blocks(text: str, max_chars: int) -> list[str]:
     """Non-table text: multi-line \\n\\n-blocks are label:value facts (split by line); single-line blocks stay whole."""
     chunks: list[str] = []

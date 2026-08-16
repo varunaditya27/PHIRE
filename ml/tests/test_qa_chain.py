@@ -10,7 +10,9 @@ from ml.claims.verifier import ClaimVerification
 from ml.chains.qa_chain import NO_EVIDENCE_MESSAGE, QAChain
 from ml.rag.retriever import Chunk
 
-EVIDENCE = [Chunk(id="e1", text="evidence", metadata={"authority": 0.8, "url": "https://example.com/e1"})]
+EVIDENCE = [Chunk(id="e1", text="evidence", metadata={
+    "authority": 0.8, "url": "https://example.com/e1", "char_start": 10, "char_end": 18,
+})]
 
 
 class FakeRetriever:
@@ -87,3 +89,24 @@ def test_verified_claim_carries_source_url_from_evidence():
     response = chain.answer("question")
 
     assert response.claims[0].source_url == "https://example.com/e1"
+
+
+def test_verified_claim_carries_source_span_from_evidence():
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+    chain = build_chain(claims, verdicts)
+
+    response = chain.answer("question")
+
+    assert response.claims[0].source_span == (10, 18)
+
+
+def test_verified_claim_has_no_source_span_when_evidence_lacks_offsets():
+    no_span_evidence = Chunk(id="e2", text="evidence", metadata={"authority": 0.8})
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, no_span_evidence)}
+    chain = build_chain(claims, verdicts)
+
+    response = chain.answer("question")
+
+    assert response.claims[0].source_span is None

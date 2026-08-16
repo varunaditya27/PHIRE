@@ -20,20 +20,19 @@ either is absent, so it works even for chunks that don't set them):
 - "published_date": ISO date string ("YYYY-MM-DD"). Missing/unparseable
   -> neutral 0.5 (no penalty for unknown age).
 
-Known limitation (found via live testing against real ingested data, not
-yet fixed): MedCPT-Cross-Encoder saturates relevance near 1.0 for *any*
-chunk that's topically on-subject, not just chunks that directly answer
-the query — e.g. for "what was my LDL cholesterol result?", several
-generic MedlinePlus cholesterol-education passages scored ~1.000 while
-the patient's own matching lab value ("LDL Cholesterol: 162 mg/dL") scored
-0.922. At RELEVANCE_WEIGHT=0.6 vs AUTHORITY_WEIGHT=0.25, that ~0.08
-relevance gap outweighs the patient document's full authority advantage
-(1.0 vs 0.9), so the patient's own record can lose to generic reference
-prose despite being the actually-correct answer. Re-tuning these weights
-off one example would repeat the mistake the benchmark-driven model
-choices elsewhere in this project exist to avoid — needs a proper
-eval set (patient-fact queries vs. general-topic queries) before the
-weights change, not a one-off adjustment.
+Known limitation, now benchmarked (ml/rag/reranker_experiments/RESULTS.md),
+not just observed once: MedCPT-Cross-Encoder saturates relevance near 1.0
+for *any* chunk that's topically on-subject — for "what was my LDL
+cholesterol result?", seven-plus MedlinePlus chunks tied at exactly 1.000
+simultaneously, not one edge-case competitor. **A weight sweep (current,
+two authority-boosted configs, an authority-off baseline) confirmed
+raising AUTHORITY_WEIGHT does not fix this and measurably hurts
+general-topic query accuracy** — the current weights (0.6/0.25/0.15) are
+already the best of everything tested. The real fix is structural (e.g.
+guaranteeing a patient-document floor independent of reranking), not a
+weight change — see that RESULTS.md for the full diagnosis and why this
+conclusion is now evidence-based rather than a documented-but-unverified
+suspicion.
 """
 
 import os
@@ -63,10 +62,21 @@ _NEUTRAL_SCORE = 0.5
 class Reranker:
     """Reorders retrieved chunks by relevance (cross-encoder) + authority + recency."""
 
-    def __init__(self, model_name: str | None = None) -> None:
+    def __init__(
+        self, model_name: str | None = None,
+        relevance_weight: float = RELEVANCE_WEIGHT, authority_weight: float = AUTHORITY_WEIGHT,
+        recency_weight: float = RECENCY_WEIGHT,
+    ) -> None:
         self.model_name = model_name or os.environ.get("RERANKER_MODEL", DEFAULT_CROSS_ENCODER_MODEL)
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(_DEVICE).eval()
+        # Instance weights, not just the module constants directly -- lets
+        # ml/rag/reranker_experiments/ compare configurations without
+        # touching global state (see that experiment's RESULTS.md for why
+        # this needed testing rather than a one-off constant change).
+        self.relevance_weight = relevance_weight
+        self.authority_weight = authority_weight
+        self.recency_weight = recency_weight
 
     def rerank(self, query: str, chunks: list[Chunk], top_k: int | None = None) -> list[Chunk]:
         """Rescore chunks against the query and return them best-first (optionally truncated to top_k)."""
@@ -92,11 +102,11 @@ class Reranker:
             return torch.sigmoid(logits).cpu().tolist()
 
     def _combine(self, relevance_score: float, chunk: Chunk) -> float:
-        """Weighted sum of relevance, authority, and recency (see module-level weights)."""
+        """Weighted sum of relevance, authority, and recency (see instance weights)."""
         return (
-            RELEVANCE_WEIGHT * relevance_score
-            + AUTHORITY_WEIGHT * self._authority_score(chunk)
-            + RECENCY_WEIGHT * self._recency_score(chunk)
+            self.relevance_weight * relevance_score
+            + self.authority_weight * self._authority_score(chunk)
+            + self.recency_weight * self._recency_score(chunk)
         )
 
     @staticmethod

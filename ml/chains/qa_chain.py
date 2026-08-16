@@ -35,12 +35,23 @@ NO_EVIDENCE_MESSAGE = "I don't have enough verified evidence to answer this conf
 
 @dataclass
 class VerifiedClaim:
-    """One claim from the draft answer, its verification status, confidence, and cited source."""
+    """One claim from the draft answer, its verification status, confidence, and cited source.
+
+    source_span is the exact (start, end) character offset within the
+    source document the evidence chunk came from — enables highlighting
+    precisely what was cited, not just linking to the whole document. Not
+    every chunk has one (table-row-derived and USDA chunks are
+    reformatted, not extracted verbatim — see
+    ml/rag/ingest/chunking.py's locate_chunk_offsets); None in that case,
+    not a wrong guess.
+    """
 
     claim: str
     status: str
     confidence: float
     source_url: str | None
+    source_filename: str | None
+    source_span: tuple[int, int] | None
 
 
 @dataclass
@@ -94,7 +105,13 @@ class QAChain:
         """Verify one claim and fold its verdict into a confidence score + source citation."""
         verification = self._verifier.verify(claim, evidence)
         rank = next((i for i, c in enumerate(evidence) if verification.evidence and c.id == verification.evidence.id), len(evidence))
-        authority = verification.evidence.metadata.get("authority", 0.0) if verification.evidence else 0.0
+        metadata = verification.evidence.metadata if verification.evidence else {}
+        authority = metadata.get("authority", 0.0)
         confidence = compute_confidence(verification.entailment_prob, verification.contradiction_prob, rank, authority)
-        source_url = verification.evidence.metadata.get("url") if verification.evidence else None
-        return VerifiedClaim(claim=claim, status=verification.status, confidence=confidence, source_url=source_url)
+        source_span = None
+        if "char_start" in metadata and "char_end" in metadata:
+            source_span = (metadata["char_start"], metadata["char_end"])
+        return VerifiedClaim(
+            claim=claim, status=verification.status, confidence=confidence,
+            source_url=metadata.get("url"), source_filename=metadata.get("filename"), source_span=source_span,
+        )

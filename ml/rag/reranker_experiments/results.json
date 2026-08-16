@@ -1,0 +1,454 @@
+[
+  {
+    "config": "current (0.6/0.25/0.15)",
+    "patient_fact_hit@1": 0.75,
+    "patient_fact_hit@3": 0.75,
+    "general_topic_hit@1": 1.0,
+    "general_topic_hit@3": 1.0,
+    "per_query": [
+      {
+        "query": "What is my potassium level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What is my creatinine level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "patient_document",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "Am I currently taking lisinopril?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "patient_document",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What is my LDL cholesterol result?",
+        "category": "patient_fact",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": false,
+        "hit@3": false
+      },
+      {
+        "query": "What causes chronic kidney disease?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "Why is LDL cholesterol considered bad for you?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What medicines treat high blood pressure?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "How can I lower my cholesterol through diet?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      }
+    ]
+  },
+  {
+    "config": "authority_boost_moderate (0.5/0.35/0.15)",
+    "patient_fact_hit@1": 0.75,
+    "patient_fact_hit@3": 0.75,
+    "general_topic_hit@1": 0.75,
+    "general_topic_hit@3": 1.0,
+    "per_query": [
+      {
+        "query": "What is my potassium level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What is my creatinine level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "patient_document",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "Am I currently taking lisinopril?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "patient_document",
+          "patient_document",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What is my LDL cholesterol result?",
+        "category": "patient_fact",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": false,
+        "hit@3": false
+      },
+      {
+        "query": "What causes chronic kidney disease?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "Why is LDL cholesterol considered bad for you?",
+        "category": "general_topic",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": false,
+        "hit@3": true
+      },
+      {
+        "query": "What medicines treat high blood pressure?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "How can I lower my cholesterol through diet?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      }
+    ]
+  },
+  {
+    "config": "authority_boost_strong (0.45/0.40/0.15)",
+    "patient_fact_hit@1": 0.75,
+    "patient_fact_hit@3": 0.75,
+    "general_topic_hit@1": 0.75,
+    "general_topic_hit@3": 1.0,
+    "per_query": [
+      {
+        "query": "What is my potassium level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What is my creatinine level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "patient_document",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "Am I currently taking lisinopril?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "patient_document",
+          "patient_document",
+          "patient_document"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What is my LDL cholesterol result?",
+        "category": "patient_fact",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": false,
+        "hit@3": false
+      },
+      {
+        "query": "What causes chronic kidney disease?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "Why is LDL cholesterol considered bad for you?",
+        "category": "general_topic",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": false,
+        "hit@3": true
+      },
+      {
+        "query": "What medicines treat high blood pressure?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "How can I lower my cholesterol through diet?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      }
+    ]
+  },
+  {
+    "config": "relevance_only (0.85/0.0/0.15)",
+    "patient_fact_hit@1": 0.25,
+    "patient_fact_hit@3": 0.75,
+    "general_topic_hit@1": 1.0,
+    "general_topic_hit@3": 1.0,
+    "per_query": [
+      {
+        "query": "What is my potassium level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "patient_document",
+          "medlineplus",
+          "patient_document"
+        ],
+        "hit@1": false,
+        "hit@3": true
+      },
+      {
+        "query": "What is my creatinine level?",
+        "category": "patient_fact",
+        "top_sources": [
+          "medlineplus",
+          "patient_document",
+          "medlineplus",
+          "patient_document",
+          "patient_document"
+        ],
+        "hit@1": false,
+        "hit@3": true
+      },
+      {
+        "query": "Am I currently taking lisinopril?",
+        "category": "patient_fact",
+        "top_sources": [
+          "patient_document",
+          "medlineplus",
+          "pubmed",
+          "pubmed",
+          "pubmed"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What is my LDL cholesterol result?",
+        "category": "patient_fact",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": false,
+        "hit@3": false
+      },
+      {
+        "query": "What causes chronic kidney disease?",
+        "category": "general_topic",
+        "top_sources": [
+          "pubmed",
+          "pubmed",
+          "pubmed",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "Why is LDL cholesterol considered bad for you?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "What medicines treat high blood pressure?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      },
+      {
+        "query": "How can I lower my cholesterol through diet?",
+        "category": "general_topic",
+        "top_sources": [
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus",
+          "medlineplus"
+        ],
+        "hit@1": true,
+        "hit@3": true
+      }
+    ]
+  }
+]

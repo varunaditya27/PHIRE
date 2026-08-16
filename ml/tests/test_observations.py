@@ -1,9 +1,9 @@
 """
-Unit tests for ml/graph/observations.py's extraction logic (pure, no
-Neo4j dependency). See test_graph_integration.py for the live write path.
+Unit tests for ml/graph/observations.py's build logic (pure, no Neo4j
+dependency). See test_graph_integration.py for the live write path.
 """
 
-from ml.graph.observations import _find_document_date, _split_value, extract_observations
+from ml.graph.observations import _split_value, build_prose_observations, build_table_observations, find_document_date
 
 TABLE_HTML = (
     "<table>\n"
@@ -29,36 +29,54 @@ def test_split_value_returns_none_for_unparseable_value():
 
 def test_find_document_date_extracts_iso_date():
     text = "Riverside Medical Group\nDate of Service: 2026-03-01\n\nSodium: 138 mEq/L"
-    assert _find_document_date(text) == "2026-03-01"
+    assert find_document_date(text) == "2026-03-01"
 
 
 def test_find_document_date_falls_back_to_today_when_absent():
     from datetime import date
-    assert _find_document_date("no date anywhere in this text") == date.today().isoformat()
+    assert find_document_date("no date anywhere in this text") == date.today().isoformat()
 
 
-def test_extract_observations_from_test_result_table():
+def test_build_table_observations_from_test_result_table():
     text = f"Riverside Medical Group\nDate of Service: 2026-03-01\n\n{TABLE_HTML}"
-    observations = extract_observations(text, document_id="doc123")
+    observations = build_table_observations(text, document_id="doc123")
 
     assert len(observations) == 2
-    sodium = next(o for o in observations if o["test_name"] == "Sodium")
+    sodium = next(o for o in observations if o["code"] == "Sodium")
     assert sodium == {
-        "id": "doc123:sodium", "test_name": "Sodium", "raw_value": "138 mEq/L",
-        "value": 138.0, "unit": "mEq/L", "reference_range": "136-145", "flag": "Normal",
-        "date": "2026-03-01",
+        "id": "doc123:sodium", "code": "Sodium", "raw_value": "138 mEq/L",
+        "value": 138.0, "unit": "mEq/L", "reference_range": "136-145", "interpretation": "Normal",
+        "effective": "2026-03-01",
     }
 
 
-def test_extract_observations_skips_non_test_result_tables():
+def test_build_table_observations_skips_non_test_result_tables():
     # An immunization-record-shaped table (Vaccine/Date/Lot#/Site) has no
     # Test/Result columns and should be silently skipped, not mis-parsed.
     other_table = (
         "<table><tr><th>Vaccine</th><th>Date</th></tr>"
         "<tr><td>Influenza</td><td>2025-10-12</td></tr></table>"
     )
-    assert extract_observations(other_table, document_id="doc123") == []
+    assert build_table_observations(other_table, document_id="doc123") == []
 
 
-def test_extract_observations_returns_empty_list_for_no_tables():
-    assert extract_observations("just plain prose, no tables", document_id="doc123") == []
+def test_build_table_observations_returns_empty_list_for_no_tables():
+    assert build_table_observations("just plain prose, no tables", document_id="doc123") == []
+
+
+def test_build_prose_observations_from_extracted_facts():
+    raw = [{"name": "Cardiothoracic ratio", "value": "0.48"}]
+    text = "Radiology Report\nDate: 2026-02-20\n\nCardiothoracic ratio measured at 0.48."
+
+    observations = build_prose_observations(raw, text, document_id="doc456")
+
+    assert observations == [{
+        "id": "doc456:cardiothoracic_ratio", "code": "Cardiothoracic ratio", "raw_value": "0.48",
+        "value": 0.48, "unit": None, "reference_range": None, "interpretation": None,
+        "effective": "2026-02-20",
+    }]
+
+
+def test_build_prose_observations_skips_entries_missing_name_or_value():
+    raw = [{"name": "", "value": "0.48"}, {"name": "Something"}]
+    assert build_prose_observations(raw, "no date here", document_id="doc456") == []

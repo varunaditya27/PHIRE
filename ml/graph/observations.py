@@ -1,18 +1,20 @@
 """
-Extracts typed Observation records from parsed table rows and writes them
-to Neo4j — the deterministic half of PHIRE's Longitudinal Health Graph
-(see ml/graph/__init__.py).
+Builds and writes typed Observation records to Neo4j — from both
+table_parsing.py's deterministic table extraction and
+prose_extraction.py's LLM-based free-text extraction, normalized to the
+same shape before writing.
 
-Schema (minimal, deliberately not built out further until a concrete
-graph query need calls for more):
+Schema (FHIR-inspired field names — code/value/effective/interpretation
+mirror FHIR's Observation resource; see docs/GRAPH_SCHEMA_ROADMAP.md for
+why full FHIR modeling isn't adopted, just the field vocabulary):
 
     (:Patient {id})-[:HAS_OBSERVATION]->(:Observation)-[:FROM_DOCUMENT]->(:Document)
 
 Patient is a single well-known node ("self") — PHIRE runs one instance
 per person (see CLAUDE.md's local-only, single-user framing), so there's
 no multi-patient schema to design around yet. Observation ids are stable
-(document_id + test name), so re-ingesting a document updates its
-Observations via MERGE rather than duplicating them.
+(document_id + code), so re-ingesting a document updates its Observations
+via MERGE rather than duplicating them.
 """
 
 import re
@@ -38,18 +40,23 @@ def _split_value(raw_value: str) -> tuple[float | None, str | None]:
         return None, None
 
 
-def _find_document_date(text: str) -> str:
+def find_document_date(text: str) -> str:
     """Best-effort clinical date from the document's own text (e.g. "Date of Service: 2026-03-01").
 
     Falls back to today's date if none is found — an observation without
     any date is worse than one dated at ingestion time, since the whole
-    point of this graph is time-series queries.
+    point of this graph is time-series queries. Shared by
+    medications.py/conditions.py too, not just table-derived Observations.
     """
     match = _DATE_RE.search(text)
     return match.group(1) if match else date.today().isoformat()
 
 
-def extract_observations(document_text: str, document_id: str) -> list[dict]:
+def _stable_id(document_id: str, code: str) -> str:
+    return f"{document_id}:{code.lower().replace(' ', '_')}"
+
+
+def build_table_observations(document_text: str, document_id: str) -> list[dict]:
     """Parse every Test/Result-shaped table in document_text into observation dicts.
 
     Only tables with "Test" and "Result" columns are recognized (labs,
@@ -59,25 +66,47 @@ def extract_observations(document_text: str, document_id: str) -> list[dict]:
     mis-typed as a lab result — a real scope limit, not a bug, until a
     second table shape is added deliberately.
     """
-    observation_date = _find_document_date(document_text)
+    effective = find_document_date(document_text)
     observations = []
     for table_html in find_table_blocks(document_text):
         for row in parse_table_rows(table_html):
-            test_name, raw_value = row.get("Test"), row.get("Result")
-            if not test_name or not raw_value:
+            code, raw_value = row.get("Test"), row.get("Result")
+            if not code or not raw_value:
                 continue
             value, unit = _split_value(raw_value)
             observations.append({
-                "id": f"{document_id}:{test_name.lower().replace(' ', '_')}",
-                "test_name": test_name,
+                "id": _stable_id(document_id, code),
+                "code": code,
                 "raw_value": raw_value,
                 "value": value,
                 "unit": unit,
                 "reference_range": row.get("Reference Range"),
-                "flag": row.get("Flag"),
-                "date": observation_date,
+                "interpretation": row.get("Flag"),
+                "effective": effective,
             })
     return observations
+
+
+def build_prose_observations(observations: list[dict], document_text: str, document_id: str) -> list[dict]:
+    """Attach a stable id + effective date to raw observation dicts from prose_extraction.extract_facts."""
+    effective = find_document_date(document_text)
+    result = []
+    for obs in observations:
+        code, raw_value = obs.get("name"), obs.get("value")
+        if not code or not raw_value:
+            continue
+        value, unit = _split_value(raw_value)
+        result.append({
+            "id": _stable_id(document_id, code),
+            "code": code,
+            "raw_value": raw_value,
+            "value": value,
+            "unit": unit,
+            "reference_range": None,
+            "interpretation": None,
+            "effective": effective,
+        })
+    return result
 
 
 def write_observations(
@@ -95,8 +124,9 @@ def write_observations(
         WITH p, d
         UNWIND $observations AS obs
         MERGE (o:Observation {id: obs.id})
-        SET o.test_name = obs.test_name, o.raw_value = obs.raw_value, o.value = obs.value,
-            o.unit = obs.unit, o.reference_range = obs.reference_range, o.flag = obs.flag, o.date = obs.date
+        SET o.code = obs.code, o.raw_value = obs.raw_value, o.value = obs.value,
+            o.unit = obs.unit, o.reference_range = obs.reference_range,
+            o.interpretation = obs.interpretation, o.effective = obs.effective
         MERGE (p)-[:HAS_OBSERVATION]->(o)
         MERGE (o)-[:FROM_DOCUMENT]->(d)
         """,

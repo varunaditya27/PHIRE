@@ -4,12 +4,13 @@ Patient document ingestion entry point.
 Extracts text from a locally-supplied patient document (lab report,
 health record), chunks it, and indexes it into the same Chroma + BM25
 store retriever.py searches (same mechanism as run_ingest.py's public
-reference evidence, but for one patient's own documents), and — for any
-tabular data the document contains (labs, vitals) — parses it into typed
-Observation nodes written to the Neo4j graph (ml/graph/). Table data has
-an explicit schema (its own column headers), so this needs no LLM
-extraction; free-text sections (progress notes, radiology impressions)
-aren't graph-extracted yet — that's a harder, separate problem.
+reference evidence, but for one patient's own documents), and extracts
+typed graph facts two ways: deterministically for tabular data (labs,
+vitals — the table's own headers are the schema, no LLM needed) and via
+schema-constrained LLM extraction for free-text sections (medications,
+conditions, observations mentioned in prose — see
+ml/graph/prose_extraction.py and ml/graph/experiments/RESULTS.md for the
+method/model choice).
 
 PHIRE runs as one local instance per person (see CLAUDE.md's "all patient
 data stays local" principle) — there is no multi-patient isolation here
@@ -33,8 +34,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ml.graph.client import GraphClient
-from ml.graph.observations import extract_observations, write_observations
-from ml.rag.ingest.chunking import chunk_ocr_text
+from ml.graph.conditions import build_conditions, write_conditions
+from ml.graph.medications import build_medications, write_medications
+from ml.graph.observations import build_prose_observations, build_table_observations, write_observations
+from ml.graph.prose_extraction import extract_facts
+from ml.rag.ingest.chunking import chunk_ocr_text, locate_chunk_offsets
 from ml.rag.ingest.patient_documents import TextExtractor, extract_text
 from ml.rag.retriever import Chunk, HybridRetriever
 
@@ -64,43 +68,62 @@ def build_chunks(
     # ingested_date, not published_date: this is when PHIRE indexed the file, not the report's clinical date (not reliably parseable from free text yet) — reranker.py's recency scoring only readspublished_date, so this deliberately doesn't feed that signal.
     ingested_date = datetime.now(timezone.utc).date().isoformat()
 
+    pieces = chunk_ocr_text(text)
+    # None for table-row chunks (reformatted, not verbatim in text — see
+    # locate_chunk_offsets' docstring), a real span for everything else.
+    offsets = locate_chunk_offsets(text, pieces)
+
     chunks = []
-    for i, piece in enumerate(chunk_ocr_text(text)):
-        chunks.append(Chunk(
-            id=f"patient_doc_{document_id}_{i}",
-            text=piece,
-            metadata={
-                "source": "patient_document",
-                "document_id": document_id,
-                "filename": file_path.name,
-                "ingested_date": ingested_date,
-                "authority": PATIENT_DOCUMENT_AUTHORITY,
-            },
-        ))
+    for i, (piece, span) in enumerate(zip(pieces, offsets)):
+        metadata = {
+            "source": "patient_document",
+            "document_id": document_id,
+            "filename": file_path.name,
+            "ingested_date": ingested_date,
+            "authority": PATIENT_DOCUMENT_AUTHORITY,
+        }
+        if span is not None:
+            metadata["char_start"], metadata["char_end"] = span
+        chunks.append(Chunk(id=f"patient_doc_{document_id}_{i}", text=piece, metadata=metadata))
     return chunks
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest one patient document into PHIRE's retriever + graph.")
     parser.add_argument("file_path", type=Path, help="Path to a patient document (text-based PDF, or JPG/PNG for OCR).")
-    parser.add_argument("--no-graph", action="store_true", help="Skip writing structured Observations to Neo4j.")
+    parser.add_argument("--no-graph", action="store_true", help="Skip writing structured facts to Neo4j.")
     args = parser.parse_args()
 
     text = extract_text(args.file_path)
     if not text:
         raise ValueError(f"No text extracted from {args.file_path} (see build_chunks' docstring for why this can happen)")
+    document_id = hashlib.sha256(args.file_path.read_bytes()).hexdigest()[:16]
+
+    # All Ollama calls (OCR above, prose extraction here) happen before
+    # HybridRetriever loads MedCPT below — both release VRAM immediately
+    # after their own call (keep_alive: 0), but running them before the
+    # embedding model loads avoids any window where both are resident on
+    # this 8GB GPU at once (verified live: this ordering was needed to
+    # avoid an OOM crash).
+    table_observations = build_table_observations(text, document_id)
+    facts = {"medications": [], "conditions": [], "observations": []}
+    if not args.no_graph:
+        facts = extract_facts(text)
 
     chunks = build_chunks(args.file_path, text=text)
     HybridRetriever().add_documents(chunks)
-    document_id = chunks[0].metadata["document_id"]
     print(f"Indexed {len(chunks)} chunks from {args.file_path.name} (document_id={document_id})")
 
     if not args.no_graph:
-        observations = extract_observations(text, document_id)
-        if observations:
-            with GraphClient() as client:
-                write_observations(client, document_id, args.file_path.name, observations)
-            print(f"Wrote {len(observations)} observations to the graph")
+        medications = build_medications(facts["medications"], text, document_id)
+        conditions = build_conditions(facts["conditions"], text, document_id)
+        observations = table_observations + build_prose_observations(facts["observations"], text, document_id)
+        with GraphClient() as client:
+            write_medications(client, document_id, args.file_path.name, medications)
+            write_conditions(client, document_id, args.file_path.name, conditions)
+            write_observations(client, document_id, args.file_path.name, observations)
+        print(f"Wrote {len(medications)} medications, {len(conditions)} conditions, "
+              f"{len(observations)} observations to the graph")
 
 
 if __name__ == "__main__":
