@@ -117,7 +117,18 @@ def main() -> None:
     if not args.no_graph:
         medications = build_medications(facts["medications"], text, document_id)
         conditions = build_conditions(facts["conditions"], text, document_id)
-        observations = table_observations + build_prose_observations(facts["observations"], text, document_id)
+        # Deduplicated by id, table entries winning ties: prose extraction
+        # runs on the whole document text, which includes the raw table
+        # content, so it can re-extract the same lab values table
+        # extraction already found deterministically. Neo4j's MERGE
+        # would collapse the duplicates either way, but counting the
+        # pre-dedup list here would print a misleading "wrote N" total
+        # that doesn't match the actual distinct facts (verified live:
+        # a single 8-row lab table reported "16 observations").
+        prose_observations = build_prose_observations(facts["observations"], text, document_id)
+        observations_by_id = {obs["id"]: obs for obs in prose_observations}
+        observations_by_id.update({obs["id"]: obs for obs in table_observations})
+        observations = list(observations_by_id.values())
         with GraphClient() as client:
             write_medications(client, document_id, args.file_path.name, medications)
             write_conditions(client, document_id, args.file_path.name, conditions)
