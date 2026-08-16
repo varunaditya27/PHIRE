@@ -18,6 +18,7 @@ fairly, it isn't a final relevance score.
 """
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,35 @@ from ml.rag.embeddings import EmbeddingModel
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CHROMA_DIR = REPO_ROOT / "data" / "chroma"
 COLLECTION_NAME = "phire_evidence"
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# BM25's IDF alone doesn't downweight these enough on a corpus this size
+# (hundreds, not millions, of documents) — without filtering, a query
+# like "should I worry about a mole on my skin?" ranks documents by
+# incidental overlap on "should"/"a"/"on"/"my" ahead of documents that
+# actually share its content words.
+_STOPWORDS = frozenset("""
+a about above after again against all am an and any are aren't as at be because been before being below between both but by can't cannot could
+couldn't did didn't do does doesn't doing don't down during each few for from further had hadn't has hasn't have haven't having he he'd he'll
+he's her here here's hers herself him himself his how how's i i'd i'll i'm i've if in into is isn't it it's its itself let's me more most
+mustn't my myself no nor not of off on once only or other ought our ours ourselves out over own same shan't she she'd she'll she's should
+shouldn't so some such than that that's the their theirs them themselves then there there's these they they'd they'll they're they've this those
+through to too under until up very was wasn't we we'd we'll we're we've were weren't what what's when when's where where's which while who
+who's whom why why's will with won't would wouldn't you you'd you'll you're you've your yours yourself yourselves
+""".split())
+
+
+def _tokenize(text: str) -> list[str]:
+    """Lowercase, punctuation-stripped, stopword-filtered tokens for BM25.
+
+    A plain .split() looked fine against short synthetic test strings but
+    silently breaks BM25 on real ingested prose: "mole" (query) vs "mole,"
+    or "Mole" (corpus, capitalized/punctuated) never match as the same
+    token, so BM25 degenerates into scoring on whatever stray function
+    words happen to line up instead of actual content terms.
+    """
+    return [t for t in _TOKEN_RE.findall(text.lower()) if t not in _STOPWORDS]
 
 
 @dataclass
@@ -57,6 +87,21 @@ class HybridRetriever:
         self._chunks: dict[str, Chunk] = {}
         self._bm25: BM25Okapi | None = None
         self._bm25_ids: list[str] = []
+        # Chroma persists embeddings across processes, but self._chunks and
+        # the BM25 index only exist in memory — without this, a fresh
+        # process (e.g. the backend querying data ingested by a separate
+        # run_ingest.py invocation) would see an empty index despite Chroma
+        # already holding the data.
+        self._load_existing_chunks()
+
+    def _load_existing_chunks(self) -> None:
+        """Rehydrate self._chunks/BM25 from whatever Chroma already has on disk."""
+        existing = self._collection.get(include=["documents", "metadatas"])
+        if not existing["ids"]:
+            return
+        for cid, text, metadata in zip(existing["ids"], existing["documents"], existing["metadatas"]):
+            self._chunks[cid] = Chunk(id=cid, text=text, metadata=dict(metadata))
+        self._rebuild_bm25()
 
     def add_documents(self, chunks: list[Chunk]) -> None:
         """Index chunks into both the Chroma vector store and the BM25 lexical index."""
@@ -84,7 +129,7 @@ class HybridRetriever:
         low hundreds of reference docs for MVP) makes a full rebuild cheap.
         """
         self._bm25_ids = list(self._chunks.keys())
-        corpus = [self._chunks[cid].text.split() for cid in self._bm25_ids]
+        corpus = [_tokenize(self._chunks[cid].text) for cid in self._bm25_ids]
         self._bm25 = BM25Okapi(corpus)
 
     def retrieve(self, query: str, top_k: int = 5) -> list[Chunk]:
@@ -106,7 +151,7 @@ class HybridRetriever:
         """BM25 exact/near-exact term search, ranked ids only."""
         if self._bm25 is None:
             return []
-        scores = self._bm25.get_scores(query.split())
+        scores = self._bm25.get_scores(_tokenize(query))
         ranked = sorted(zip(self._bm25_ids, scores), key=lambda pair: pair[1], reverse=True)
         return [cid for cid, _ in ranked[:top_k]]
 

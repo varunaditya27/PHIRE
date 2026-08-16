@@ -5,7 +5,7 @@ Uses a fake embedding model (no network/model download) so these tests run
 fast and don't depend on Hugging Face availability.
 """
 
-from ml.rag.retriever import Chunk, HybridRetriever
+from ml.rag.retriever import Chunk, HybridRetriever, _tokenize
 
 
 class FakeEmbeddingModel:
@@ -51,3 +51,20 @@ def test_retrieve_ranks_lexical_and_semantic_matches(tmp_path):
 def test_retrieve_returns_empty_when_no_documents(tmp_path):
     retriever = build_retriever(tmp_path)
     assert retriever.retrieve("anything") == []
+
+
+def test_tokenize_lowercases_strips_punctuation_and_drops_stopwords():
+    assert _tokenize("Should I worry about a Mole on my skin?") == ["worry", "mole", "skin"]
+
+
+def test_retriever_reloads_existing_chunks_on_fresh_instance(tmp_path):
+    persist_dir = tmp_path / "chroma"
+    first = HybridRetriever(embedding_model=FakeEmbeddingModel(), persist_dir=persist_dir)
+    first.add_documents([Chunk(id="a", text="ldl cholesterol levels rising", metadata={"source": "a"})])
+
+    # A fresh instance (e.g. a new backend process) should see chunks
+    # ingested by a prior instance, since Chroma persists them to disk —
+    # only self._chunks/BM25 needed rehydrating on init.
+    second = HybridRetriever(embedding_model=FakeEmbeddingModel(), persist_dir=persist_dir)
+
+    assert [c.id for c in second.retrieve("ldl cholesterol", top_k=1)] == ["a"]
