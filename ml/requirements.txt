@@ -16,13 +16,17 @@ chromadb==1.5.9      # in-process vector store for RAG (PHIRE's default)
 numpy==2.5.2         # direct dep in ml/rag/experiments (ranking/scoring), also transitive via torch
 requests==2.34.2     # direct dep in ml/rag/ingest (PubMed/MedlinePlus/USDA APIs), also transitive via huggingface_hub
 
+# --- Patient document ingestion ---
+pypdf==6.16.1        # text extraction from text-based PDF lab reports/records
+
 # --- Graph RAG (longitudinal + relational retrieval, see
 #     docs/DATASETS_AND_GRAPH_RAG.md) ---
 # lightrag-hku       # Ollama-native local graph extraction/retrieval
 # neo4j              # driver for the Neo4j-backed entity/relationship graph
 
-# --- Claim verification ---
-# medragchecker      # or equivalent NLI-based entailment checker
+# --- Claim verification: implemented via facebook/bart-large-mnli
+#     (transformers, already pinned above) — see
+#     ml/claims/experiments/RESULTS.md for the model-selection benchmark.
 
 # --- ML frameworks (recommendations) ---
 # torch already pinned above (Embeddings / retrieval)

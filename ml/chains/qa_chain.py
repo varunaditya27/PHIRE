@@ -70,7 +70,16 @@ class QAChain:
 
     def answer(self, question: str, observations: list[str] | None = None, top_k: int = 5) -> ChatResponse:
         """Run the full retrieve -> generate -> verify -> abstain pipeline for one question."""
-        candidates = self._retriever.retrieve(question, top_k=top_k * 2)
+        # Wide candidate pool before reranking, not just top_k*2: a
+        # specific patient fact (one line, narrow match) competes against
+        # hundreds of topically-similar general reference chunks on pure
+        # BM25/semantic similarity alone and can lose that contest despite
+        # being the authoritative answer — reranker.py's authority
+        # weighting only gets a chance to promote it if it survives into
+        # the candidate pool in the first place. Verified live: a patient
+        # document's own lab value ranked outside a top_k*2=10 pool but
+        # inside a wider one.
+        candidates = self._retriever.retrieve(question, top_k=max(20, top_k * 4))
         evidence = self._reranker.rerank(question, candidates, top_k=top_k)
 
         prompt = build_chat_prompt(question, evidence, observations)

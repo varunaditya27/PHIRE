@@ -13,14 +13,27 @@ already adopted for embeddings (ml/rag/embeddings.py, see
 ml/rag/experiments/RESULTS.md), so reranking stays consistent with that
 decision instead of introducing an unrelated model.
 
-Chunk.metadata has no fixed schema yet (document ingestion isn't built).
-This module defines the two keys it reads and degrades to a neutral score
-when either is absent, so it works before ingestion sets them and doesn't
-silently misrank once it does:
+Chunk.metadata keys this module reads (degrades to a neutral score if
+either is absent, so it works even for chunks that don't set them):
 - "authority": float in [0, 1] (e.g. clinical guideline > peer-reviewed
   study > patient-reported note). Missing/out-of-range -> neutral 0.5.
 - "published_date": ISO date string ("YYYY-MM-DD"). Missing/unparseable
   -> neutral 0.5 (no penalty for unknown age).
+
+Known limitation (found via live testing against real ingested data, not
+yet fixed): MedCPT-Cross-Encoder saturates relevance near 1.0 for *any*
+chunk that's topically on-subject, not just chunks that directly answer
+the query — e.g. for "what was my LDL cholesterol result?", several
+generic MedlinePlus cholesterol-education passages scored ~1.000 while
+the patient's own matching lab value ("LDL Cholesterol: 162 mg/dL") scored
+0.922. At RELEVANCE_WEIGHT=0.6 vs AUTHORITY_WEIGHT=0.25, that ~0.08
+relevance gap outweighs the patient document's full authority advantage
+(1.0 vs 0.9), so the patient's own record can lose to generic reference
+prose despite being the actually-correct answer. Re-tuning these weights
+off one example would repeat the mistake the benchmark-driven model
+choices elsewhere in this project exist to avoid — needs a proper
+eval set (patient-fact queries vs. general-topic queries) before the
+weights change, not a one-off adjustment.
 """
 
 import os

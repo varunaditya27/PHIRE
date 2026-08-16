@@ -68,3 +68,19 @@ def test_retriever_reloads_existing_chunks_on_fresh_instance(tmp_path):
     second = HybridRetriever(embedding_model=FakeEmbeddingModel(), persist_dir=persist_dir)
 
     assert [c.id for c in second.retrieve("ldl cholesterol", top_k=1)] == ["a"]
+
+
+def test_add_documents_overwrites_existing_chunk_with_same_id(tmp_path):
+    retriever = build_retriever(tmp_path)
+    retriever.add_documents([Chunk(id="a", text="statin dosage changed last visit", metadata={"v": 1})])
+
+    # Re-ingesting the same id with new content (e.g. re-processing an
+    # updated patient document) must replace it, not silently keep the
+    # stale version — Chroma's add() no-ops on a duplicate id, which is
+    # why add_documents uses upsert() instead.
+    retriever.add_documents([Chunk(id="a", text="ldl cholesterol levels rising", metadata={"v": 2})])
+
+    assert retriever._chunks["a"].text == "ldl cholesterol levels rising"
+    stored = retriever._collection.get(ids=["a"], include=["documents", "metadatas"])
+    assert stored["documents"][0] == "ldl cholesterol levels rising"
+    assert stored["metadatas"][0]["v"] == 2

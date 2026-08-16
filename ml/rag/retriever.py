@@ -108,7 +108,11 @@ class HybridRetriever:
         if not chunks:
             return
         embeddings = self._embedder.embed_documents([c.text for c in chunks])
-        self._collection.add(
+        # upsert, not add: add() silently no-ops on a duplicate id instead
+        # of replacing its content, so re-ingesting an updated document
+        # (same id, new text) would leave the stale version in Chroma
+        # forever — verified live via patient-document re-ingestion.
+        self._collection.upsert(
             ids=[c.id for c in chunks],
             embeddings=embeddings,
             documents=[c.text for c in chunks],
