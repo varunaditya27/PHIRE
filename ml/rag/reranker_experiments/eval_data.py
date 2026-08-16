@@ -16,7 +16,7 @@ QUERIES = [
     {"query": "What is my potassium level?", "category": "patient_fact"},
     {"query": "What is my creatinine level?", "category": "patient_fact"},
     {"query": "Am I currently taking lisinopril?", "category": "patient_fact"},
-    {"query": "What is my LDL cholesterol result?", "category": "patient_fact"},
+    {"query": "what was my LDL cholesterol result?", "category": "patient_fact"},
     # General-topic: public reference material should rank first --
     # nothing in the patient's own record answers "why"/"what causes"
     # questions, only their own values.
@@ -26,9 +26,15 @@ QUERIES = [
     {"query": "How can I lower my cholesterol through diet?", "category": "general_topic"},
 ]
 
+# Round 1 (floor=False throughout): found that no weight config fixes
+# the patient-fact miss without hurting general-topic accuracy — see
+# RESULTS.md. Round 2 adds the structural fix (Reranker's
+# enable_patient_floor) on top of the current weights, tested against the
+# same weight-only baseline to isolate its effect.
 WEIGHT_CONFIGS = [
-    {"name": "current (0.6/0.25/0.15)", "relevance": 0.6, "authority": 0.25, "recency": 0.15},
-    {"name": "authority_boost_moderate (0.5/0.35/0.15)", "relevance": 0.5, "authority": 0.35, "recency": 0.15},
-    {"name": "authority_boost_strong (0.45/0.40/0.15)", "relevance": 0.45, "authority": 0.40, "recency": 0.15},
-    {"name": "relevance_only (0.85/0.0/0.15)", "relevance": 0.85, "authority": 0.0, "recency": 0.15},
+    {"name": "current (0.6/0.25/0.15), floor off", "relevance": 0.6, "authority": 0.25, "recency": 0.15, "floor": False},
+    {"name": "authority_boost_moderate (0.5/0.35/0.15), floor off", "relevance": 0.5, "authority": 0.35, "recency": 0.15, "floor": False},
+    {"name": "authority_boost_strong (0.45/0.40/0.15), floor off", "relevance": 0.45, "authority": 0.40, "recency": 0.15, "floor": False},
+    {"name": "relevance_only (0.85/0.0/0.15), floor off", "relevance": 0.85, "authority": 0.0, "recency": 0.15, "floor": False},
+    {"name": "current (0.6/0.25/0.15), floor ON", "relevance": 0.6, "authority": 0.25, "recency": 0.15, "floor": True},
 ]

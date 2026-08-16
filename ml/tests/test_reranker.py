@@ -15,11 +15,12 @@ from ml.rag.retriever import Chunk
 class StubReranker(Reranker):
     """Reranker with a fixed relevance score per chunk, no model loaded."""
 
-    def __init__(self, relevance_scores: list[float]) -> None:
+    def __init__(self, relevance_scores: list[float], enable_patient_floor: bool = True) -> None:
         self._relevance_scores_fixture = relevance_scores
         self.relevance_weight = RELEVANCE_WEIGHT
         self.authority_weight = AUTHORITY_WEIGHT
         self.recency_weight = RECENCY_WEIGHT
+        self.enable_patient_floor = enable_patient_floor
 
     def _relevance_scores(self, query: str, chunks: list[Chunk]) -> list[float]:
         return self._relevance_scores_fixture
@@ -97,3 +98,64 @@ def test_custom_weights_change_ranking():
     # actually reads, not module constants baked in at import time.
     scores = {c.id: reranker._combine(0.5, c) for c in chunks}
     assert scores["low_authority"] == scores["high_authority"] == 0.5
+
+
+def test_patient_floor_promotes_close_relevance_patient_chunk_into_top_k():
+    # Mirrors the real failure this fixes: several reference chunks tied
+    # at max relevance, the patient's own chunk close behind (within
+    # PATIENT_FLOOR_RELEVANCE_MARGIN) but not close enough to make top_k
+    # on weighted score alone.
+    chunks = [
+        Chunk(id="ref1", text="x", metadata={"authority": 0.9}),
+        Chunk(id="ref2", text="x", metadata={"authority": 0.9}),
+        Chunk(id="ref3", text="x", metadata={"authority": 0.9}),
+        Chunk(id="patient", text="x", metadata={"authority": 1.0, "source": "patient_document"}),
+    ]
+    reranker = StubReranker(relevance_scores=[1.0, 1.0, 1.0, 0.93])
+
+    ranked = reranker.rerank("query", chunks, top_k=3)
+
+    assert "patient" in [c.id for c in ranked]
+    assert len(ranked) == 3
+
+
+def test_patient_floor_does_not_force_in_an_unrelated_patient_chunk():
+    # The patient chunk's relevance is far below the pool's best -- a
+    # genuinely unrelated match should not be forced into the result just
+    # because it's a patient document.
+    chunks = [
+        Chunk(id="ref1", text="x", metadata={"authority": 0.9}),
+        Chunk(id="ref2", text="x", metadata={"authority": 0.9}),
+        Chunk(id="patient", text="x", metadata={"authority": 1.0, "source": "patient_document"}),
+    ]
+    reranker = StubReranker(relevance_scores=[1.0, 1.0, 0.3])
+
+    ranked = reranker.rerank("query", chunks, top_k=2)
+
+    assert "patient" not in [c.id for c in ranked]
+
+
+def test_patient_floor_disabled_leaves_ranking_untouched():
+    chunks = [
+        Chunk(id="ref1", text="x", metadata={"authority": 0.9}),
+        Chunk(id="ref2", text="x", metadata={"authority": 0.9}),
+        Chunk(id="ref3", text="x", metadata={"authority": 0.9}),
+        Chunk(id="patient", text="x", metadata={"authority": 1.0, "source": "patient_document"}),
+    ]
+    reranker = StubReranker(relevance_scores=[1.0, 1.0, 1.0, 0.93], enable_patient_floor=False)
+
+    ranked = reranker.rerank("query", chunks, top_k=3)
+
+    assert "patient" not in [c.id for c in ranked]
+
+
+def test_patient_floor_no_op_when_patient_chunk_already_in_top_k():
+    chunks = [
+        Chunk(id="patient", text="x", metadata={"authority": 1.0, "source": "patient_document"}),
+        Chunk(id="ref1", text="x", metadata={"authority": 0.9}),
+    ]
+    reranker = StubReranker(relevance_scores=[1.0, 0.5])
+
+    ranked = reranker.rerank("query", chunks, top_k=2)
+
+    assert [c.id for c in ranked] == ["patient", "ref1"]

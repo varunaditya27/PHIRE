@@ -20,19 +20,20 @@ either is absent, so it works even for chunks that don't set them):
 - "published_date": ISO date string ("YYYY-MM-DD"). Missing/unparseable
   -> neutral 0.5 (no penalty for unknown age).
 
-Known limitation, now benchmarked (ml/rag/reranker_experiments/RESULTS.md),
-not just observed once: MedCPT-Cross-Encoder saturates relevance near 1.0
-for *any* chunk that's topically on-subject — for "what was my LDL
-cholesterol result?", seven-plus MedlinePlus chunks tied at exactly 1.000
-simultaneously, not one edge-case competitor. **A weight sweep (current,
-two authority-boosted configs, an authority-off baseline) confirmed
-raising AUTHORITY_WEIGHT does not fix this and measurably hurts
-general-topic query accuracy** — the current weights (0.6/0.25/0.15) are
-already the best of everything tested. The real fix is structural (e.g.
-guaranteeing a patient-document floor independent of reranking), not a
-weight change — see that RESULTS.md for the full diagnosis and why this
-conclusion is now evidence-based rather than a documented-but-unverified
-suspicion.
+Structural fix for a known limitation (ml/rag/reranker_experiments/RESULTS.md):
+MedCPT-Cross-Encoder saturates relevance near 1.0 for *any* chunk that's
+topically on-subject — for "what was my LDL cholesterol result?",
+seven-plus MedlinePlus chunks tied at exactly 1.000 simultaneously, not
+one edge-case competitor. A weight sweep (current, two authority-boosted
+configs, an authority-off baseline) confirmed raising AUTHORITY_WEIGHT
+doesn't fix this and measurably hurts general-topic query accuracy — no
+reasonable weight can outvote that many simultaneous ties. Instead of
+tuning weights further, `rerank()` applies a patient-document floor: if
+the best-matching patient-document chunk's own relevance score is within
+PATIENT_FLOOR_RELEVANCE_MARGIN of the single best relevance score in the
+candidate pool, it's promoted into top_k regardless of where pure
+weighted scoring placed it — see ml/rag/reranker_experiments/RESULTS.md
+for the empirical validation of this fix.
 """
 
 import os
@@ -58,6 +59,15 @@ RECENCY_WEIGHT = 0.15
 RECENCY_HALF_LIFE_DAYS = 730
 _NEUTRAL_SCORE = 0.5
 
+PATIENT_DOCUMENT_SOURCE = "patient_document"
+# The observed gap between a genuinely relevant patient chunk (~0.92) and
+# a saturated reference chunk (1.000) in the investigation that motivated
+# this fix — see ml/rag/reranker_experiments/RESULTS.md. A margin this
+# size promotes a patient chunk that's clearly relevant but shut out by
+# ties, without forcing in a patient chunk that's actually unrelated to
+# the query (a general-topic question with no personal answer).
+PATIENT_FLOOR_RELEVANCE_MARGIN = 0.1
+
 
 class Reranker:
     """Reorders retrieved chunks by relevance (cross-encoder) + authority + recency."""
@@ -65,7 +75,7 @@ class Reranker:
     def __init__(
         self, model_name: str | None = None,
         relevance_weight: float = RELEVANCE_WEIGHT, authority_weight: float = AUTHORITY_WEIGHT,
-        recency_weight: float = RECENCY_WEIGHT,
+        recency_weight: float = RECENCY_WEIGHT, enable_patient_floor: bool = True,
     ) -> None:
         self.model_name = model_name or os.environ.get("RERANKER_MODEL", DEFAULT_CROSS_ENCODER_MODEL)
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
@@ -77,6 +87,10 @@ class Reranker:
         self.relevance_weight = relevance_weight
         self.authority_weight = authority_weight
         self.recency_weight = recency_weight
+        # Disableable for ml/rag/reranker_experiments/ to compare
+        # weight-only vs. weight+floor behavior; production always wants
+        # this on.
+        self.enable_patient_floor = enable_patient_floor
 
     def rerank(self, query: str, chunks: list[Chunk], top_k: int | None = None) -> list[Chunk]:
         """Rescore chunks against the query and return them best-first (optionally truncated to top_k)."""
@@ -89,7 +103,35 @@ class Reranker:
         ]
         scored.sort(key=lambda pair: pair[1], reverse=True)
         ranked = [chunk for chunk, _ in scored]
-        return ranked[:top_k] if top_k is not None else ranked
+        relevance_by_id = {chunk.id: relevance[i] for i, chunk in enumerate(chunks)}
+
+        if top_k is not None:
+            if self.enable_patient_floor:
+                ranked = self._apply_patient_floor(ranked, relevance_by_id, top_k)
+            return ranked[:top_k]
+        return ranked
+
+    def _apply_patient_floor(self, ranked: list[Chunk], relevance_by_id: dict[str, float], top_k: int) -> list[Chunk]:
+        """Promote the best-matching patient-document chunk into top_k if ties otherwise excluded it.
+
+        Only promotes when that chunk's own relevance is close to the
+        pool's best (PATIENT_FLOOR_RELEVANCE_MARGIN) — a query with no
+        real personal answer (e.g. "what causes chronic kidney disease")
+        shouldn't have an unrelated patient-document chunk forced in just
+        because one exists in the pool.
+        """
+        patient_chunks = [c for c in ranked if c.metadata.get("source") == PATIENT_DOCUMENT_SOURCE]
+        if not patient_chunks or patient_chunks[0] in ranked[:top_k]:
+            return ranked
+
+        best_patient = patient_chunks[0]
+        relevance_gap = relevance_by_id[ranked[0].id] - relevance_by_id[best_patient.id]
+        if relevance_gap > PATIENT_FLOOR_RELEVANCE_MARGIN:
+            return ranked
+
+        promoted = [c for c in ranked if c is not best_patient]
+        promoted.insert(top_k - 1, best_patient)
+        return promoted
 
     def _relevance_scores(self, query: str, chunks: list[Chunk]) -> list[float]:
         """Cross-encoder relevance for each chunk, squashed to [0, 1] via sigmoid."""
