@@ -2,7 +2,8 @@
 
 **Alignment**: Official RVCE NLP-06 problem statement + Comprehensive research (2023-2026)
 **Date**: August 2026
-**Version**: 1.0 (MVP focused)
+**Version**: 1.1 (dataset/model choices finalized — see
+[docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md))
 
 ---
 
@@ -100,10 +101,12 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - Real-time food detection
 - Multi-dish identification
 - Portion size estimation (depth sensing)
-- **Open-source tools**:
-  - YOLOv8 or EfficientNet (food detection)
-  - Food-101, UECFood100 datasets
-  - USDA FoodData Central (nutrition reference)
+- **Open-source tools (finalized)**:
+  - YOLOv8 or EfficientNet-B0 (food detection/classification)
+  - Food-101 dataset — **classification backbone only**; category labels
+    carry no macro/portion data, so this stage answers "what dish is this,"
+    not "what's in it"
+  - USDA FoodData Central (nutrition reference, joined after identification)
 - **MVP Status**: Month 3-4
 - **Research Angle**: "How does food image analysis improve personalized nutrition recommendations vs. manual entry?"
 
@@ -112,9 +115,16 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - Integration with user profile (dietary restrictions, goals)
 - Comparison with logged meals (evidence-backed)
 - Confidence scores on estimates
-- **Tools**:
-  - Recipe1M dataset (1M recipes + images + nutrition)
-  - Nutrition5k dataset (~5K dishes with labels)
+- **Tools (finalized)**:
+  - **Nutrition5k dataset — primary training set.** CC BY 4.0 (commercial
+    use permitted), weighed (not estimated) ground truth, clean per-dish
+    and per-ingredient CSV schema. Promoted ahead of Recipe1M+ after
+    dataset validation found it to be the only CV nutrition dataset with
+    unrestricted licensing and directly-usable columns.
+  - Recipe1M+ dataset — recipe/meal generation and recipe↔image linking
+    only; its nutrition fields cover a subset of recipes (only those with
+    parsed unit+quantity), so it is a secondary source for macro ground
+    truth, not primary
   - Transfer learning from ImageNet baseline
 - **MVP Status**: Month 4-5
 - **Research Angle**: "Can visual nutrition estimation achieve >85% macro accuracy vs. manual USDA reference?"
@@ -122,13 +132,16 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 ### Vision Feature B: Exercise Posture Analysis
 
 **12. Real-time Pose Estimation**
-- MediaPipe Pose (33 landmarks) or OpenPose
+- MediaPipe Pose (33 landmarks) — **finalized as the primary approach; no
+  custom pose model is trained.** OpenPose kept only as a slower,
+  higher-accuracy fallback for group-fitness scenarios.
 - Video/webcam input
-- Joint angle computation
+- Joint angle computation directly from MediaPipe's 33-point x/y/z +
+  visibility output
 - **Open-source tools**:
-  - MediaPipe Pose (TensorFlow Lite, local deployment)
-  - OpenPose (OpenBLAS, GPU-optional)
-  - PoseNet (lightweight, TensorFlow)
+  - MediaPipe Pose (TensorFlow Lite, local deployment) — run directly, this
+    replaces training on a pose dataset entirely
+  - OpenPose (OpenBLAS, GPU-optional) — fallback only
 - **MVP Status**: Month 3-4
 - **Research Angle**: "Can local pose estimation provide exercise form feedback without cloud processing?"
 
@@ -140,13 +153,24 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - **Integration with fitness recommendations**:
   - Link form feedback to user's current fitness level
   - Progressive difficulty tracking
-  - Injury prevention alerts
-- **Tools**:
-  - Custom models trained on form datasets
-  - HumanAI3.6M (3.6M 3D poses)
-  - DeepLabCut for multi-person pose
+  - Injury prevention alerts *(soften this claim, or back it with a proper
+    study — see fit issue below)*
+- **Tools (corrected after dataset validation)**:
+  - MediaPipe Pose joint angles as the input feature (no separate pose
+    dataset needed)
+  - Kaggle exercise-pose datasets (e.g. "Squat Exercise Pose Dataset") to
+    fine-tune an MVP form-scoring classifier on top of those joint angles
+  - ~~HumanAI3.6M (3.6M 3D poses)~~ — **removed.** This referenced
+    Human3.6M, whose 17 activities are indoor daily-life poses (phone
+    calls, smoking, discussing), not exercises — no squat/push-up/lunge
+    class exists in it. It is also academic-account-gated and
+    non-redistributable. See
+    [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md) §2.5.
 - **MVP Status**: Month 4-5
 - **Research Angle**: "Does real-time form feedback improve exercise compliance and safety vs. generic recommendations?"
+- **Fit issue**: Kaggle exercise-pose datasets are small, crowd-sourced,
+  and unevenly licensed — fine for an MVP demo, not a sufficient basis on
+  their own for a clinically-flavored "injury prevention" claim.
 
 ### Vision Integration with Evidence Attribution
 
@@ -188,11 +212,18 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - Quantized model evaluation
 - **MVP Status**: Month 4-6
 
-**18. Hybrid Structured + Semantic Retrieval** (NLP-06 §4.F)
+**18. Hybrid Structured + Semantic + Graph Retrieval** (NLP-06 §4.F, extended)
 - BM25 exact term matching (for lab values)
-- Dense retrieval (semantic similarity)
+- Dense retrieval (semantic similarity, Chroma)
+- **Graph traversal (finalized addition)** — LightRAG over a Neo4j-backed
+  Longitudinal Health Graph, for multi-hop and relational questions vector
+  similarity can't answer ("how did my LDL change relative to my statin
+  dose changes"), and for surfacing conflicting records via explicit
+  `conflicts_with`/`supersedes` edges rather than a similarity heuristic.
+  Full rationale: [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md) §3.
 - Reranking (authority, recency, relevance)
-- **MVP Status**: Month 2-3
+- **MVP Status**: Month 2-3 (BM25 + Chroma is the Tier 0 baseline; graph
+  layer is the Month 2-3 addition)
 
 **19. Evidence Quality Ranking** (NLP-06 §4.G)
 - Authority tiers (guidelines > RCTs > observational)
@@ -257,14 +288,22 @@ From NLP-06 §4 (Later Extensions):
 - **MedRAGChecker** (claim verification)
 - **LangChain** (RAG orchestration)
 - **Sentence-Transformers** (embeddings)
+- **LightRAG + Neo4j** (graph-based retrieval — finalized third leg of
+  hybrid retrieval, see Feature 18)
 
 ### Computer Vision
-- **MediaPipe Pose** (pose estimation)
-- **YOLOv8** (food detection)
-- **USDA FoodData Central** (nutrition reference)
-- **Recipe1M** (recipe + nutrition dataset)
-- **Nutrition5k** (food image + macros)
-- **Food-101** (food classification dataset)
+- **MediaPipe Pose** (pose estimation — run directly, no training)
+- **YOLOv8 / EfficientNet-B0** (food detection/classification)
+- **USDA FoodData Central** (nutrition reference — essential grounding source)
+- **Nutrition5k** (primary CV nutrition training set — CC BY 4.0, weighed ground truth)
+- **Recipe1M+** (recipe generation + recipe↔image linking; nutrition-filtered subset only)
+- **Food-101** (classification backbone only, not a nutrition source)
+- **Kaggle exercise-pose datasets** (MVP-only form-scoring fine-tune)
+
+### Fitness & Nutrition Tabular ML
+- **PAMAP2 → WISDM** (HAR pretrain → fine-tune pipeline)
+- **CGMacros** (nutrition personalization/outcome layer)
+- **AI4FoodDB** (candidate, pending schema verification — not yet committed)
 
 ### ML Training
 - **PyTorch/TensorFlow** (model training)

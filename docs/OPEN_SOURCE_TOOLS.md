@@ -3,6 +3,10 @@
 **Status**: Comprehensive toolkit identified for MVP + extended phases
 **Date**: August 2026
 **Research Basis**: 2024-2026 active projects and papers
+**Note**: Dataset/model choices in this doc are finalized in
+[docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md), which also
+corrects one factual error (item 29, "HumanAI 3.6M") found during dataset
+validation. That doc is authoritative where the two disagree.
 
 ---
 
@@ -106,9 +110,45 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 **9. Medical Graph RAG**
 - **Paper**: [ACL 2025](https://aclanthology.org/2025.acl-long.1381.pdf)
 - **Functionality**: Graph-based RAG with entity linking
-- **PHIRE Role**: Optional Month 2+ enhancement (entity-aware retrieval)
+- **PHIRE Role**: Month 2-3, **finalized** (was "optional") — this is the
+  conceptual basis for PHIRE's third retrieval leg. See items 9a/9b for the
+  concrete tools and [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md)
+  §3 for the full architecture and rationale.
 - **Approach**: Triple-graph construction (subject-predicate-object)
-- **Why PHIRE**: Improves retrieval precision for complex medical queries
+- **Why PHIRE**: Vector/lexical retrieval is similarity-based and cannot
+  answer multi-hop or relational questions ("how did my LDL change
+  relative to my statin dose changes"); a graph makes those chains
+  traversable instead of hoping embedding similarity surfaces them.
+
+**9a. LightRAG** (Graph RAG implementation — finalized choice)
+- **GitHub**: [HKUDS/LightRAG](https://github.com/HKUDS/LightRAG) · **Paper**: EMNLP 2025
+- **License**: MIT
+- **Functionality**: Graph-based RAG with local entity/relationship
+  extraction and retrieval
+- **Maturity**: Actively developed, multimodal support + RAGAS evaluation (2026)
+- **PHIRE Role**: Primary graph-RAG library, replacing generic "Medical
+  Graph RAG" as a concrete dependency
+- **Why PHIRE**: Natively supports Ollama for entity/relationship
+  extraction, so PHI never leaves the local boundary during graph
+  construction — the deciding factor over Microsoft's GraphRAG, whose
+  cloud-oriented, global-summarization design is a worse fit for
+  real-time, per-patient, local queries. Published benchmarks show it
+  outperforming naive RAG, HyDE, and Microsoft GraphRAG on retrieval
+  accuracy and efficiency. Supports Neo4j, MongoDB, PostgreSQL, and
+  OpenSearch as storage backends.
+
+**9b. Neo4j (graph store)**
+- **GitHub**: [neo4j/neo4j](https://github.com/neo4j/neo4j) · [neo4j/neo4j-graphrag-python](https://github.com/neo4j/neo4j-graphrag-python)
+- **License**: GPLv3 (Community Edition, self-hosted)
+- **Functionality**: Graph database backing LightRAG's entity/relationship graph
+- **PHIRE Role**: Storage for the Longitudinal Health Graph (Observation /
+  Medication / Condition / Claim nodes with temporal + provenance edges)
+- **Why PHIRE**: Already PHIRE's candidate "graph layer" in the original
+  architecture notes; self-hosted keeps it inside the local privacy
+  boundary. A graph edge (`supports`, `contraindicated_by`,
+  `conflicts_with`) doubles as an evidence/provenance link for free —
+  directly reusable for fitness/nutrition recommendation attribution, not
+  just medical claims.
 
 **10. MEGA-RAG**
 - **Paper**: Frontiers in Public Health 2025
@@ -216,28 +256,44 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 - **Why PHIRE**: Lightweight (5.3M params), ~90% accuracy on Food-101
 
 **21. Food-101 Dataset**
-- **Source**: ETH Zurich (open access)
-- **License**: Creative Commons (non-commercial)
+- **Source**: ETH Zurich; images sourced via Foodspotting (own terms, not CC-licensed by ETH)
+- **License**: Research/fair-use; not freely redistributable
 - **Size**: 101 food categories, 101K images
-- **PHIRE Role**: Pre-training + evaluation
+- **PHIRE Role**: **Pretraining/classification backbone only** ("what dish is
+  this") — finalized as secondary to Nutrition5k (item 23). Category
+  labels carry no macro/portion data, so this dataset alone cannot answer
+  a nutrition question; it must feed a join to Nutrition5k or USDA
+  FoodData Central (item 24) to produce one.
 - **Link**: [food-101.ethz.ch](http://food-101.ethz.ch/)
-- **Why PHIRE**: Standard benchmark, excellent quality
+- **Why PHIRE**: Standard benchmark, large N, good classification backbone
 
-**22. Recipe1M Dataset**
-- **Source**: MIT-IBM (open access)
-- **License**: Creative Commons BY-NC
-- **Size**: 1M recipes + images + nutritional labels
-- **PHIRE Role**: Recipe-to-nutrition linking
-- **Features**: Ingredients + instructions + macros
-- **Why PHIRE**: First recipe dataset with nutrition at scale
+**22. Recipe1M+ Dataset**
+- **Source**: MIT CSAIL (request-gated access)
+- **License**: Non-commercial research/education only
+- **Size**: 1M+ recipes + 13M+ images + partial nutritional labels
+- **PHIRE Role**: Recipe-to-nutrition linking, meal plan generation
+- **Features**: Ingredients + instructions + macros — **but nutrition
+  fields exist only for the subset of recipes where unit and quantity
+  were both successfully parsed.** Filter explicitly on non-null
+  nutrition before treating a recipe as a macro source; the rest have no
+  nutrition row, not a zero.
+- **Why PHIRE**: First recipe dataset with nutrition at scale, once filtered
 
-**23. Nutrition5k Dataset**
-- **Source**: MIT-IBM (2021)
-- **License**: Creative Commons BY-NC
-- **Size**: 5K dishes, 10 images per dish, detailed nutrition
-- **PHIRE Role**: Calorie estimation ground truth
-- **Accuracy**: ~85% MAPE on macros
-- **Why PHIRE**: Best accuracy for vision-based calorie estimation
+**23. Nutrition5k Dataset (finalized: primary CV nutrition dataset)**
+- **Source**: Google Research (`google-research-datasets/Nutrition5k`)
+- **License**: CC BY 4.0 — commercial use permitted, attribution required
+- **Size**: ~5K dishes, 4 rotating videos + top-down RGB-D per dish, weighed
+  (not estimated) ground truth
+- **Schema**: `dish_id, total_calories, total_mass, total_fat, total_carb,
+  total_protein, num_ingrs`, repeated per-ingredient
+  (`ingr_N_grams, ingr_N_calories, ...`)
+- **PHIRE Role**: Primary training set for calorie/macro estimation —
+  promoted ahead of Food-101/Recipe1M+ after dataset validation because it
+  is the only CV nutrition dataset with unrestricted licensing, clean
+  columns, and directly-usable ground truth requiring no external join
+- **Why PHIRE**: Best accuracy for vision-based calorie estimation, and the
+  only one of the three CV nutrition datasets safe for eventual commercial
+  use without renegotiation
 
 **24. USDA FoodData Central**
 - **Source**: USDA (open access)
@@ -259,18 +315,23 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 
 ### B. Exercise Posture & Form Analysis
 
-**26. MediaPipe Pose**
+**26. MediaPipe Pose (finalized: run directly, no dataset/training needed)**
 - **GitHub**: [google/mediapipe](https://github.com/google/mediapipe)
 - **License**: Apache 2.0
 - **Functionality**: Real-time pose estimation (33 landmarks)
 - **Maturity**: Production-ready (2024)
-- **PHIRE Role**: Exercise form detection
+- **PHIRE Role**: Exercise form detection — **this replaces "train a custom
+  pose model" entirely for MVP.** Compute joint angles (squat depth,
+  elbow flexion) directly from its 33-point output; only reach for a
+  labeled exercise dataset (item 29) to classify which exercise/rep phase
+  is happening, not to re-derive pose itself.
 - **Capabilities**:
-  - 33-point skeletal model
+  - 33-point skeletal model, x/y/z + visibility per point
   - <100ms latency on CPU
   - Webcam/video input
   - Mobile-native support
-- **Why PHIRE**: Fastest (runs on Raspberry Pi), privacy-first
+- **Why PHIRE**: Fastest (runs on Raspberry Pi), privacy-first — no video
+  needs to leave the device
 
 **27. OpenPose**
 - **GitHub**: [CMU-Perceptual-Computing-Lab/openpose](https://github.com/CMU-Perceptual-Computing-Lab/openpose)
@@ -288,11 +349,22 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 - **PHIRE Role**: Joint detection + exercise classification
 - **Why PHIRE**: Latest variant (2024), good balance of speed/accuracy
 
-**29. Exercise Form Benchmarks**
+**29. Exercise Form Benchmarks (corrected after dataset validation)**
 - **Datasets**:
-  - **HumanAI 3.6M**: 3.6M 3D pose sequences (various exercises)
+  - ~~**HumanAI 3.6M**: 3.6M 3D pose sequences (various exercises)~~ —
+    **removed.** This previously referenced Human3.6M, which does not
+    match this description: its 17 activities are indoor daily-life poses
+    (talking on the phone, smoking, discussing) with no squat, push-up,
+    lunge, or deadlift class. It is also academic-account-gated and
+    explicitly non-redistributable. See
+    [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md) §2.5.
+  - **Kaggle exercise-pose datasets** (e.g. "Squat Exercise Pose
+    Dataset"): small, crowd-sourced, joint-angle-labeled sets — usable for
+    an MVP form-scoring fine-tune on top of MediaPipe's joint angles.
+    Check each dataset's license individually; do not use as the sole
+    basis for a clinical-flavored claim like "injury prevention" without
+    independent validation.
   - **Custom labeled dataset**: Build from PHIRE user videos (month 3+)
-  - **AI Gym Dataset**: Labeled workout exercises
 - **PHIRE Role**: Evaluate rep counting, form correctness
 
 **30. Real-Time Feedback Framework**
@@ -431,17 +503,19 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 
 ### Month 2-3 (Phase 2)
 ➕ Add:
-- Medical Graph RAG
+- LightRAG + Neo4j (graph RAG — finalized third retrieval leg, see
+  [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md))
 - MEGA-RAG
-- YOLOv8, EfficientNet-B0
-- MediaPipe Pose
+- YOLOv8/EfficientNet-B0 (Food-101 classification backbone), MediaPipe Pose
 - Open Wearables (prep)
 
 ### Month 4-6 (Phase 3)
 ➕ Add:
-- Food-101, Recipe1M, Nutrition5k, USDA integration
-- Custom HAR fine-tuning
-- Exercise form models
+- Nutrition5k (primary CV nutrition training set), Food-101 (backbone),
+  Recipe1M+ (nutrition-filtered subset), USDA FoodData Central integration
+- PAMAP2 → WISDM HAR pretrain/fine-tune pipeline
+- CGMacros personalization layer; AI4FoodDB only after schema verification
+- Exercise form models (MediaPipe joint angles + Kaggle exercise-pose fine-tune)
 - LoRA fine-tuning pipeline
 - Weights & Biases tracking
 
@@ -467,8 +541,22 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 | YOLOv8 | AGPL | ⚠️ | Yes (with license) |
 | PyTorch | BSD | ✅ | Yes |
 | Docker | Apache 2.0 | ✅ | Requires hardening |
+| MediaPipe | Apache 2.0 | ✅ | Yes (local) |
+| YOLOv8 | AGPL | ⚠️ | Yes (with license) |
+| PyTorch | BSD | ✅ | Yes |
+| Docker | Apache 2.0 | ✅ | Requires hardening |
+| LightRAG | MIT | ✅ | Yes (local via Ollama) |
+| Neo4j (Community) | GPLv3 | ✅ (self-hosted) | Yes (local) |
+| PAMAP2 | CC BY 4.0 | ✅ | N/A (public research data) |
+| WISDM | Free, research use | ✅ | N/A |
+| Nutrition5k | CC BY 4.0 | ✅ | N/A |
+| USDA FoodData Central | Public domain | ✅ | N/A |
+| CGMacros | CC BY-NC-SA 4.0 | ❌ (non-commercial) | N/A |
+| Food-101 | Research/fair-use only | ⚠️ | N/A |
+| Recipe1M+ | Non-commercial research/education only | ❌ | N/A |
+| AI4FoodDB | Research-only (see repo LICENSE.md) | ❌ | N/A — pending schema verification |
 
-**Note**: All MVP tools are fully compliant with commercial + HIPAA deployments. Verify YOLOv8 licensing for production use.
+**Note**: All MVP tools are fully compliant with commercial + HIPAA deployments. Verify YOLOv8 licensing for production use. Several finalized nutrition datasets (CGMacros, Recipe1M+, AI4FoodDB) are non-commercial-only — fine for PHIRE's current research status, but flag them before any future commercial pivot. Full dataset rationale: [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md).
 
 ---
 
@@ -495,6 +583,11 @@ After MVP, consider contributing back:
 | 2024 | Real-Time Pose Correction | Exercise form feedback |
 | 2024 | YOLOv8 Pose | Exercise detection |
 | 2023 | Nutrition5k | Calorie estimation accuracy |
+| 2024 | Real-Time Pose Correction | Exercise form feedback |
+| 2024 | YOLOv8 Pose | Exercise detection |
+| 2023 | Nutrition5k | Calorie estimation accuracy |
+| 2025 | LightRAG (EMNLP) | Local graph-based RAG (finalized) |
+| 2025 | CGMacros (Scientific Data) | Personalized nutrition + glycemic outcome data |
 
 ---
 
@@ -511,6 +604,11 @@ After MVP, consider contributing back:
 - [ ] MediaPipe Pose (placeholder for Month 3)
 - [ ] YOLOv8 (placeholder for Month 3)
 - [ ] Open Wearables docs reviewed (Month 3)
+- [ ] MediaPipe Pose (placeholder for Month 3)
+- [ ] YOLOv8 (placeholder for Month 3)
+- [ ] Open Wearables docs reviewed (Month 3)
+- [ ] LightRAG + Neo4j graph layer (Month 2-3, see DATASETS_AND_GRAPH_RAG.md)
+- [ ] AI4FoodDB schema pulled and verified before any ingestion code is written
 
 ---
 

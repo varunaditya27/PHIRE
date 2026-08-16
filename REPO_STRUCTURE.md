@@ -12,7 +12,8 @@ phire/
 ├── docs/
 │   ├── FEATURES_ALIGNED.md         # Feature spec (MVP + extended)
 │   ├── AGGRESSIVE_ROADMAP.md       # 3-week MVP + 9-month timeline
-│   └── OPEN_SOURCE_TOOLS.md        # 40+ integrated tools & frameworks
+│   ├── OPEN_SOURCE_TOOLS.md        # 40+ integrated tools & frameworks
+│   └── DATASETS_AND_GRAPH_RAG.md   # Finalized datasets/models + graph RAG architecture
 │
 ├── backend/                         # VARUN OWNS
 │   ├── app/

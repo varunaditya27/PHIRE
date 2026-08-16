@@ -8,6 +8,11 @@ sentence-transformers
 rank-bm25
 chromadb             # in-process vector store for RAG (PHIRE's default)
 
+# --- Graph RAG (longitudinal + relational retrieval, see
+#     docs/DATASETS_AND_GRAPH_RAG.md) ---
+# lightrag-hku       # Ollama-native local graph extraction/retrieval
+# neo4j              # driver for the Neo4j-backed entity/relationship graph
+
 # --- Claim verification ---
 # medragchecker      # or equivalent NLI-based entailment checker
 

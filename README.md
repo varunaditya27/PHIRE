@@ -37,12 +37,17 @@ Frontend (Next.js)
     ↓
 FastAPI Backend (Python)
     ↓ ↙ ↘
-Ollama     RAG System      ML Models
-(Local     (Chroma)        (Recommendations)
- LLM)
+Ollama     RAG System            ML Models
+(Local     (Chroma vector +      (Recommendations)
+ LLM)       BM25 + LightRAG/Neo4j graph)
     ↓ ↓ ↓ ↓
 PostgreSQL (Patient Data, Timeline, Claims, Evidence)
 ```
+
+RAG is hybrid, not vector-only: lexical (BM25) and semantic (Chroma) search
+handle single-hop lookups; a graph layer (LightRAG over Neo4j) handles
+multi-hop, longitudinal, and contradiction-surfacing questions. See
+[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md) for why.
 
 **Key design principle**: All data stays local. No cloud APIs, no external LLM calls.
 
@@ -108,6 +113,7 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for complete feature ro
 - **Backend**: FastAPI, Python 3.10+
 - **LLM**: Ollama + MedGemma 1.5 8B (or Meditron-7B)
 - **Vector DB**: Chroma (or Qdrant)
+- **Graph DB**: Neo4j (Community Edition) via LightRAG, for longitudinal/relational retrieval
 - **Database**: PostgreSQL
 - **ML Models**: TensorFlow/PyTorch (optional, for recommendations)
 - **Deployment**: Docker, Docker Compose
@@ -121,6 +127,7 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for complete feature ro
 - **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap (MVP + extended, aligned to NLP-06)
 - **[docs/AGGRESSIVE_ROADMAP.md](docs/AGGRESSIVE_ROADMAP.md)** - 3-week MVP + 9-month timeline
 - **[docs/OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md)** - 40+ open-source tools & integration guide
+- **[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md)** - Finalized fitness/nutrition datasets, model choices, and the hybrid vector + graph RAG architecture
 - **[REPO_STRUCTURE.md](REPO_STRUCTURE.md)** - Repository layout & folder ownership
 
 ---
