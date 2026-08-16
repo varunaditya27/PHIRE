@@ -8,12 +8,9 @@ docs/FEATURES_ALIGNED.md Feature 7).
 """
 
 import json
-import re
 
 from ml.llm.ollama_client import OllamaClient
 from ml.llm.prompts import CLAIM_EXTRACTION_PROMPT
-
-_JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 
 class ClaimExtractor:
@@ -31,12 +28,24 @@ class ClaimExtractor:
 
     @staticmethod
     def _parse_claims(response: str) -> list[str]:
-        """Pull the JSON array out of the model's response, tolerating stray prose around it."""
-        match = _JSON_ARRAY_RE.search(response)
-        if not match:
+        """Pull the JSON array out of the model's response, tolerating stray prose around it.
+
+        Uses json.JSONDecoder.raw_decode from the first "[", not a greedy
+        regex up to the last "]" — a regex match spanning from the first
+        "[" to the *last* "]" in the whole response swallows any trailing
+        text that happens to contain a "]" (e.g. "...claims: [...] Let me
+        know if you need [more] details.") into the match, breaking JSON
+        parsing and silently dropping every claim. raw_decode parses
+        exactly one JSON value starting at that position and ignores
+        whatever trailing text follows it.
+        """
+        start = response.find("[")
+        if start == -1:
             return []
         try:
-            claims = json.loads(match.group(0))
+            claims, _ = json.JSONDecoder().raw_decode(response, start)
         except json.JSONDecodeError:
+            return []
+        if not isinstance(claims, list):
             return []
         return [c.strip() for c in claims if isinstance(c, str) and c.strip()]

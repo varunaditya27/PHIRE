@@ -14,9 +14,16 @@ from ml.graph.client import GraphClient
 from ml.graph.observations import DEFAULT_PATIENT_ID, find_document_date
 
 
-def build_medications(medications: list[dict], document_text: str, document_id: str) -> list[dict]:
-    """Attach a stable id + effective date to raw medication dicts from prose_extraction.extract_facts."""
-    effective = find_document_date(document_text)
+def build_medications(
+    medications: list[dict], document_text: str, document_id: str, effective_date: str | None = None,
+) -> list[dict]:
+    """Attach a stable id + effective date to raw medication dicts from prose_extraction.extract_facts.
+
+    Pass effective_date to skip re-scanning document_text for a date if
+    the caller already extracted it (see observations.build_table_observations'
+    docstring for why).
+    """
+    effective = effective_date if effective_date is not None else find_document_date(document_text)
     result = []
     for med in medications:
         name = med.get("name")

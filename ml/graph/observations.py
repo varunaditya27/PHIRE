@@ -56,7 +56,9 @@ def _stable_id(document_id: str, code: str) -> str:
     return f"{document_id}:{code.lower().replace(' ', '_')}"
 
 
-def build_table_observations(document_text: str, document_id: str) -> list[dict]:
+def build_table_observations(
+    document_text: str, document_id: str, effective_date: str | None = None,
+) -> list[dict]:
     """Parse every Test/Result-shaped table in document_text into observation dicts.
 
     Only tables with "Test" and "Result" columns are recognized (labs,
@@ -65,8 +67,14 @@ def build_table_observations(document_text: str, document_id: str) -> list[dict]
     Vaccine/Date/Lot#/Site) doesn't match and is silently skipped, not
     mis-typed as a lab result — a real scope limit, not a bug, until a
     second table shape is added deliberately.
+
+    Pass effective_date to skip re-scanning document_text for a date —
+    callers that already extracted it once (e.g. ingest_patient_document's
+    main(), which calls this alongside build_prose_observations/
+    build_medications/build_conditions on the identical text) shouldn't
+    each redo the same regex scan.
     """
-    effective = find_document_date(document_text)
+    effective = effective_date if effective_date is not None else find_document_date(document_text)
     observations = []
     for table_html in find_table_blocks(document_text):
         for row in parse_table_rows(table_html):
@@ -87,9 +95,11 @@ def build_table_observations(document_text: str, document_id: str) -> list[dict]
     return observations
 
 
-def build_prose_observations(observations: list[dict], document_text: str, document_id: str) -> list[dict]:
+def build_prose_observations(
+    observations: list[dict], document_text: str, document_id: str, effective_date: str | None = None,
+) -> list[dict]:
     """Attach a stable id + effective date to raw observation dicts from prose_extraction.extract_facts."""
-    effective = find_document_date(document_text)
+    effective = effective_date if effective_date is not None else find_document_date(document_text)
     result = []
     for obs in observations:
         code, raw_value = obs.get("name"), obs.get("value")

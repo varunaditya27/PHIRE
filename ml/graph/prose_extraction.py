@@ -77,34 +77,41 @@ EXTRACTION_PROMPT = (
 def extract_facts(text: str, model: str | None = None) -> dict:
     """Extract medications, conditions, and observations from free-text clinical content.
 
-    Returns empty lists (not an exception) on a parse failure — one
-    document's extraction going wrong shouldn't abort ingestion of
-    everything else that document produces (vector chunks, table-derived
-    Observations).
+    Returns empty lists (not an exception) on *any* failure — network
+    error, malformed response, or unparseable output — not just a JSON
+    parse failure. One document's extraction going wrong shouldn't abort
+    ingestion of everything else that document produces (vector chunks,
+    table-derived Observations); catching only json.JSONDecodeError left
+    an Ollama connection error or malformed response body free to crash
+    the whole ingest run, contradicting that contract (found via review).
     """
-    response = requests.post(
-        f"{OLLAMA_HOST}/api/generate",
-        json={
-            "model": model or DEFAULT_MODEL,
-            "prompt": EXTRACTION_PROMPT.format(text=text),
-            "stream": False,
-            "format": EXTRACTION_SCHEMA,
-            "options": {"temperature": 0.0},
-            # Same reasoning as ml/rag/ingest/ocr.py: release VRAM right
-            # after this one-off call, and qwen3.5 is a reasoning model
-            # that silently discards its answer into an unread "thinking"
-            # field without this being turned off (found live in
-            # ml/graph/experiments/RESULTS.md).
-            "keep_alive": 0,
-            "think": False,
-        },
-        timeout=300,
-    )
-    response.raise_for_status()
+    empty_facts = {"medications": [], "conditions": [], "observations": []}
     try:
+        response = requests.post(
+            f"{OLLAMA_HOST}/api/generate",
+            json={
+                "model": model or DEFAULT_MODEL,
+                "prompt": EXTRACTION_PROMPT.format(text=text),
+                "stream": False,
+                "format": EXTRACTION_SCHEMA,
+                "options": {"temperature": 0.0},
+                # Same reasoning as ml/rag/ingest/ocr.py: release VRAM right
+                # after this one-off call, and qwen3.5 is a reasoning model
+                # that silently discards its answer into an unread "thinking"
+                # field without this being turned off (found live in
+                # ml/graph/experiments/RESULTS.md).
+                "keep_alive": 0,
+                "think": False,
+            },
+            timeout=300,
+        )
+        response.raise_for_status()
         parsed = json.loads(response.json()["response"])
-    except json.JSONDecodeError:
-        return {"medications": [], "conditions": [], "observations": []}
+    except (requests.RequestException, KeyError, json.JSONDecodeError) as exc:
+        print(f"prose_extraction.extract_facts failed, skipping this document's prose facts: {exc}")
+        return empty_facts
+    if not isinstance(parsed, dict):
+        return empty_facts
     return {
         "medications": parsed.get("medications", []),
         "conditions": parsed.get("conditions", []),

@@ -12,10 +12,11 @@ import os
 
 from neo4j import Driver, GraphDatabase
 
+from ml.local_only import require_localhost
+
 DEFAULT_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 DEFAULT_USER = os.environ.get("NEO4J_USER", "neo4j")
 DEFAULT_PASSWORD = os.environ.get("NEO4J_PASSWORD", "")
-_ALLOWED_HOST_FRAGMENTS = ("localhost", "127.0.0.1")
 
 
 class GraphClient:
@@ -23,8 +24,7 @@ class GraphClient:
 
     def __init__(self, uri: str | None = None, user: str | None = None, password: str | None = None) -> None:
         self.uri = uri or DEFAULT_URI
-        if not any(fragment in self.uri for fragment in _ALLOWED_HOST_FRAGMENTS):
-            raise ValueError(f"GraphClient only permits a localhost URI, got: {self.uri}")
+        require_localhost(self.uri)
         self._driver: Driver = GraphDatabase.driver(self.uri, auth=(user or DEFAULT_USER, password or DEFAULT_PASSWORD))
 
     def run(self, query: str, **params) -> list[dict]:

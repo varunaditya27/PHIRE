@@ -10,9 +10,10 @@ import os
 
 import requests
 
+from ml.local_only import require_localhost
+
 DEFAULT_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "medgemma:4b")
-_ALLOWED_HOST_PREFIXES = ("http://localhost", "http://127.0.0.1")
 
 
 class OllamaClient:
@@ -21,8 +22,7 @@ class OllamaClient:
     def __init__(self, model: str | None = None, host: str | None = None) -> None:
         self.model = model or DEFAULT_MODEL
         self.host = host or DEFAULT_HOST
-        if not self.host.startswith(_ALLOWED_HOST_PREFIXES):
-            raise ValueError(f"OllamaClient only permits a localhost host, got: {self.host}")
+        require_localhost(self.host)
 
     def generate(self, prompt: str, system: str | None = None, temperature: float = 0.2) -> str:
         """Non-streaming completion via Ollama's /api/generate endpoint."""

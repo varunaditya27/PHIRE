@@ -135,6 +135,29 @@ def test_patient_floor_does_not_force_in_an_unrelated_patient_chunk():
     assert "patient" not in [c.id for c in ranked]
 
 
+def test_patient_floor_margin_uses_best_relevance_not_top_combined_score():
+    # ranked[0] (best *combined* score) is deliberately NOT the chunk
+    # with the best *relevance* here: "top_combined" wins on combined
+    # score via authority+recency despite lower relevance than
+    # "high_relevance". A margin check against ranked[0]'s relevance
+    # (0.7) would wrongly consider the patient chunk (relevance 0.75)
+    # "close enough" (gap -0.05) and promote it -- the correct gap
+    # against the pool's true best relevance (1.0) is 0.25, outside
+    # PATIENT_FLOOR_RELEVANCE_MARGIN, so it should NOT be promoted.
+    today = date.today().isoformat()
+    chunks = [
+        Chunk(id="high_relevance", text="x", metadata={}),
+        Chunk(id="top_combined", text="x", metadata={"authority": 1.0, "published_date": today}),
+        Chunk(id="patient", text="x", metadata={"source": "patient_document"}),
+    ]
+    reranker = StubReranker(relevance_scores=[1.0, 0.7, 0.75])
+
+    ranked = reranker.rerank("query", chunks, top_k=2)
+
+    assert [c.id for c in ranked] == ["top_combined", "high_relevance"]
+    assert "patient" not in [c.id for c in ranked]
+
+
 def test_patient_floor_disabled_leaves_ranking_untouched():
     chunks = [
         Chunk(id="ref1", text="x", metadata={"authority": 0.9}),

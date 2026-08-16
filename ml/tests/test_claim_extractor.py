@@ -34,6 +34,18 @@ def test_parse_claims_drops_non_string_and_blank_entries():
     assert ClaimExtractor._parse_claims(response) == ["A real claim."]
 
 
+def test_parse_claims_ignores_trailing_text_containing_brackets():
+    # A prior greedy regex (first "[" to the *last* "]" in the whole
+    # response) swallowed trailing text like this into the match,
+    # producing invalid JSON and silently dropping every claim.
+    response = '["LDL cholesterol is elevated."]\n\nLet me know if you need [more] details.'
+    assert ClaimExtractor._parse_claims(response) == ["LDL cholesterol is elevated."]
+
+
+def test_parse_claims_returns_empty_list_when_response_has_no_array():
+    assert ClaimExtractor._parse_claims('{"claims": "not a list"}') == []
+
+
 def test_extract_returns_empty_list_for_blank_answer():
     extractor = ClaimExtractor.__new__(ClaimExtractor)  # skip __init__, no client needed
     assert extractor.extract("   ") == []

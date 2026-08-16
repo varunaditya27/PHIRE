@@ -18,10 +18,11 @@ from pathlib import Path
 
 import requests
 
+from ml.local_only import require_localhost
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OCR_MODEL", "hf.co/bartowski/allenai_olmOCR-2-7B-1025-GGUF:Q4_K_M")
 SUPPORTED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
-_ALLOWED_HOST_PREFIXES = ("http://localhost", "http://127.0.0.1")
 
 # Verbatim from allenai/olmocr's prompts.py (build_no_anchoring_v4_yaml_prompt)
 # — this is the prompt olmOCR was actually trained against.
@@ -99,8 +100,7 @@ class OCRTextExtractor:
     def __init__(self, model: str | None = None, host: str | None = None) -> None:
         self.model = model or DEFAULT_MODEL
         self.host = host or OLLAMA_HOST
-        if not self.host.startswith(_ALLOWED_HOST_PREFIXES):
-            raise ValueError(f"OCRTextExtractor only permits a localhost host, got: {self.host}")
+        require_localhost(self.host)
 
     def supports(self, file_path: Path) -> bool:
         return file_path.suffix.lower() in SUPPORTED_SUFFIXES

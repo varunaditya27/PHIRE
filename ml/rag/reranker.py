@@ -125,7 +125,15 @@ class Reranker:
             return ranked
 
         best_patient = patient_chunks[0]
-        relevance_gap = relevance_by_id[ranked[0].id] - relevance_by_id[best_patient.id]
+        # The single best *relevance* score in the pool, not ranked[0]'s
+        # relevance -- ranked is sorted by combined weighted score, so
+        # ranked[0] isn't necessarily the top-relevance chunk (a
+        # lower-relevance, higher-authority chunk can out-combine it).
+        # Using ranked[0]'s relevance here silently loosened the margin
+        # this promised (found via review, not the value swept in
+        # RESULTS.md).
+        best_relevance = max(relevance_by_id.values())
+        relevance_gap = best_relevance - relevance_by_id[best_patient.id]
         if relevance_gap > PATIENT_FLOOR_RELEVANCE_MARGIN:
             return ranked
 
