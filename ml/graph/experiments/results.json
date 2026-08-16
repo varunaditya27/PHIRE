@@ -1,0 +1,748 @@
+[
+  {
+    "model": "HandRolled + medgemma:4b",
+    "med_name_recall": 0.9333,
+    "med_dosage": 0.9333,
+    "med_frequency": 0.9333,
+    "med_status": 0.9333,
+    "obs_name_recall": 1.0,
+    "obs_value": 1.0,
+    "per_document": [
+      {
+        "id": "progress_note",
+        "extracted": {
+          "medications": [
+            {
+              "name": "lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "started"
+            },
+            {
+              "name": "atorvastatin",
+              "dosage": "40mg",
+              "frequency": "at bedtime",
+              "status": "started"
+            }
+          ],
+          "observations": [
+            {
+              "name": "blood pressure",
+              "value": "elevated"
+            },
+            {
+              "name": "LDL cholesterol",
+              "value": "191 mg/dL"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "radiology_report",
+        "extracted": {
+          "medications": [
+            {
+              "name": "unspecified",
+              "dosage": "unspecified",
+              "frequency": "unspecified",
+              "status": "unspecified"
+            }
+          ],
+          "observations": [
+            {
+              "name": "cardiome diastinal silhouette",
+              "value": "within normal limits"
+            },
+            {
+              "name": "cardiothoracic ratio",
+              "value": "0.48"
+            },
+            {
+              "name": "no acute osseous abnormality",
+              "value": "unspecified"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "medication_reconciliation",
+        "extracted": {
+          "medications": [
+            {
+              "name": "Atorvastatin",
+              "dosage": "40mg",
+              "frequency": "nightly",
+              "status": "continued"
+            },
+            {
+              "name": "Lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "Metformin",
+              "dosage": "1000mg",
+              "frequency": "twice daily",
+              "status": "continued"
+            },
+            {
+              "name": "Apixaban",
+              "dosage": "5mg",
+              "frequency": "twice daily",
+              "status": "started"
+            }
+          ],
+          "observations": [
+            {
+              "name": "atrial fibrillation",
+              "value": "new"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 0.8,
+          "dosage_accuracy": 0.8,
+          "frequency_accuracy": 0.8,
+          "status_accuracy": 0.8
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      }
+    ]
+  },
+  {
+    "model": "HandRolled + qwen3.5:9b",
+    "med_name_recall": 1.0,
+    "med_dosage": 1.0,
+    "med_frequency": 1.0,
+    "med_status": 1.0,
+    "obs_name_recall": 1.0,
+    "obs_value": 1.0,
+    "per_document": [
+      {
+        "id": "progress_note",
+        "extracted": {
+          "medications": [
+            {
+              "name": "lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "started"
+            },
+            {
+              "name": "atorvastatin",
+              "dosage": "40mg",
+              "frequency": "at bedtime",
+              "status": "started"
+            }
+          ],
+          "observations": [
+            {
+              "name": "Blood pressure",
+              "value": "elevated"
+            },
+            {
+              "name": "LDL cholesterol",
+              "value": "191 mg/dL"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "radiology_report",
+        "extracted": {
+          "medications": [],
+          "observations": [
+            {
+              "name": "Cardiothoracic ratio",
+              "value": "0.48"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "medication_reconciliation",
+        "extracted": {
+          "medications": [
+            {
+              "name": "Atorvastatin",
+              "dosage": "40mg",
+              "frequency": "nightly",
+              "status": "continued"
+            },
+            {
+              "name": "Lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "Metformin",
+              "dosage": "1000mg",
+              "frequency": "twice daily",
+              "status": "continued"
+            },
+            {
+              "name": "Apixaban",
+              "dosage": "5mg",
+              "frequency": "twice daily",
+              "status": "started"
+            },
+            {
+              "name": "Aspirin",
+              "dosage": "81mg",
+              "frequency": "daily",
+              "status": "discontinued"
+            }
+          ],
+          "observations": []
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      }
+    ]
+  },
+  {
+    "model": "HandRolled + qwen3.5:27b-q4_K_M",
+    "med_name_recall": 1.0,
+    "med_dosage": 1.0,
+    "med_frequency": 1.0,
+    "med_status": 1.0,
+    "obs_name_recall": 1.0,
+    "obs_value": 1.0,
+    "per_document": [
+      {
+        "id": "progress_note",
+        "extracted": {
+          "medications": [
+            {
+              "name": "lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "started"
+            },
+            {
+              "name": "atorvastatin",
+              "dosage": "40mg",
+              "frequency": "at bedtime",
+              "status": "started"
+            }
+          ],
+          "observations": [
+            {
+              "name": "Blood pressure",
+              "value": "elevated"
+            },
+            {
+              "name": "LDL cholesterol",
+              "value": "191 mg/dL"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "radiology_report",
+        "extracted": {
+          "medications": [],
+          "observations": [
+            {
+              "name": "Cardiothoracic ratio",
+              "value": "0.48"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "medication_reconciliation",
+        "extracted": {
+          "medications": [
+            {
+              "name": "Atorvastatin",
+              "dosage": "40mg",
+              "frequency": "nightly",
+              "status": "continued"
+            },
+            {
+              "name": "Lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "Metformin",
+              "dosage": "1000mg",
+              "frequency": "twice daily",
+              "status": "continued"
+            },
+            {
+              "name": "Apixaban",
+              "dosage": "5mg",
+              "frequency": "twice daily",
+              "status": "started"
+            },
+            {
+              "name": "Aspirin",
+              "dosage": "81mg",
+              "frequency": "daily",
+              "status": "discontinued"
+            }
+          ],
+          "observations": []
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      }
+    ]
+  },
+  {
+    "model": "LangExtract + medgemma:4b",
+    "med_name_recall": 1.0,
+    "med_dosage": 1.0,
+    "med_frequency": 1.0,
+    "med_status": 0.6667,
+    "obs_name_recall": 1.0,
+    "obs_value": 1.0,
+    "per_document": [
+      {
+        "id": "progress_note",
+        "extracted": {
+          "medications": [
+            {
+              "name": "lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "increased"
+            },
+            {
+              "name": "atorvastatin",
+              "dosage": "40mg",
+              "frequency": "at bedtime",
+              "status": "added"
+            }
+          ],
+          "observations": [
+            {
+              "name": "blood pressure",
+              "value": "elevated"
+            },
+            {
+              "name": "LDL cholesterol",
+              "value": "191 mg/dL"
+            },
+            {
+              "name": "basic metabolic panel",
+              "value": ""
+            },
+            {
+              "name": "lipid panel",
+              "value": ""
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 0.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "radiology_report",
+        "extracted": {
+          "medications": [],
+          "observations": [
+            {
+              "name": "Cardiothoracic ratio",
+              "value": "0.48"
+            },
+            {
+              "name": "Cardiothoracic ratio",
+              "value": "within normal limits"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "medication_reconciliation",
+        "extracted": {
+          "medications": [
+            {
+              "name": "Atorvastatin",
+              "dosage": "40mg",
+              "frequency": "nightly",
+              "status": "continued"
+            },
+            {
+              "name": "Lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "Metformin",
+              "dosage": "1000mg",
+              "frequency": "twice daily",
+              "status": "continued"
+            },
+            {
+              "name": "Apixaban",
+              "dosage": "5mg",
+              "frequency": "twice daily",
+              "status": "started"
+            },
+            {
+              "name": "Aspirin",
+              "dosage": "81mg",
+              "frequency": "daily",
+              "status": "discontinued"
+            }
+          ],
+          "observations": []
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      }
+    ]
+  },
+  {
+    "model": "LangExtract + qwen3.5:9b",
+    "med_name_recall": 1.0,
+    "med_dosage": 1.0,
+    "med_frequency": 1.0,
+    "med_status": 0.8333,
+    "obs_name_recall": 1.0,
+    "obs_value": 1.0,
+    "per_document": [
+      {
+        "id": "progress_note",
+        "extracted": {
+          "medications": [
+            {
+              "name": "lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "atorvastatin",
+              "dosage": "40mg",
+              "frequency": "at bedtime",
+              "status": "started"
+            }
+          ],
+          "observations": [
+            {
+              "name": "Blood pressure",
+              "value": "elevated"
+            },
+            {
+              "name": "LDL cholesterol",
+              "value": "191 mg/dL"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 0.5
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "radiology_report",
+        "extracted": {
+          "medications": [],
+          "observations": [
+            {
+              "name": "Cardiothoracic ratio",
+              "value": "0.48"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "medication_reconciliation",
+        "extracted": {
+          "medications": [
+            {
+              "name": "Atorvastatin",
+              "dosage": "40mg",
+              "frequency": "nightly",
+              "status": "continued"
+            },
+            {
+              "name": "Lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "Metformin",
+              "dosage": "1000mg",
+              "frequency": "twice daily",
+              "status": "continued"
+            },
+            {
+              "name": "Apixaban",
+              "dosage": "5mg",
+              "frequency": "twice daily",
+              "status": "started"
+            },
+            {
+              "name": "Aspirin",
+              "dosage": "81mg",
+              "frequency": "daily",
+              "status": "discontinued"
+            }
+          ],
+          "observations": []
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      }
+    ]
+  },
+  {
+    "model": "LangExtract + qwen3.5:27b-q4_K_M",
+    "med_name_recall": 1.0,
+    "med_dosage": 1.0,
+    "med_frequency": 1.0,
+    "med_status": 0.8333,
+    "obs_name_recall": 1.0,
+    "obs_value": 1.0,
+    "per_document": [
+      {
+        "id": "progress_note",
+        "extracted": {
+          "medications": [
+            {
+              "name": "lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "atorvastatin",
+              "dosage": "40mg",
+              "frequency": "at bedtime",
+              "status": "started"
+            }
+          ],
+          "observations": [
+            {
+              "name": "Blood pressure",
+              "value": "elevated"
+            },
+            {
+              "name": "LDL cholesterol",
+              "value": "191 mg/dL"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 0.5
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "radiology_report",
+        "extracted": {
+          "medications": [],
+          "observations": [
+            {
+              "name": "Cardiothoracic ratio",
+              "value": "0.48"
+            }
+          ]
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      },
+      {
+        "id": "medication_reconciliation",
+        "extracted": {
+          "medications": [
+            {
+              "name": "Atorvastatin",
+              "dosage": "40mg",
+              "frequency": "nightly",
+              "status": "continued"
+            },
+            {
+              "name": "Lisinopril",
+              "dosage": "20mg",
+              "frequency": "daily",
+              "status": "continued"
+            },
+            {
+              "name": "Metformin",
+              "dosage": "1000mg",
+              "frequency": "twice daily",
+              "status": "continued"
+            },
+            {
+              "name": "Apixaban",
+              "dosage": "5mg",
+              "frequency": "twice daily",
+              "status": "started"
+            },
+            {
+              "name": "Aspirin",
+              "dosage": "81mg",
+              "frequency": "daily",
+              "status": "discontinued"
+            }
+          ],
+          "observations": []
+        },
+        "medication_scores": {
+          "name_recall": 1.0,
+          "dosage_accuracy": 1.0,
+          "frequency_accuracy": 1.0,
+          "status_accuracy": 1.0
+        },
+        "observation_scores": {
+          "name_recall": 1.0,
+          "value_accuracy": 1.0
+        }
+      }
+    ]
+  }
+]
