@@ -81,6 +81,13 @@ class ClaimVerifier:
             if best_probs is None or informativeness > max(best_probs["entailment"], best_probs["contradiction"]):
                 best_chunk, best_probs = chunk, probs
 
+        # evidence is non-empty (checked above), so the loop runs at
+        # least once and its first iteration always sets best_probs
+        # (best_probs is None is True on that iteration) -- best_probs is
+        # never actually None here. Asserted, not just relied upon, so a
+        # future refactor that breaks this invariant fails loudly here
+        # instead of surfacing as a confusing downstream KeyError.
+        assert best_probs is not None
         status = self._status_from_probs(best_probs)
         return ClaimVerification(claim, status, best_probs["entailment"], best_probs["contradiction"], best_chunk)
 

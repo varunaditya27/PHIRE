@@ -11,7 +11,8 @@ diagnosis has a status (active/resolved/historical), not a value/unit
 """
 
 from ml.graph.client import GraphClient
-from ml.graph.observations import DEFAULT_PATIENT_ID, find_document_date
+from ml.graph.document_dates import find_document_date
+from ml.graph.observations import DEFAULT_PATIENT_ID
 
 
 def build_conditions(

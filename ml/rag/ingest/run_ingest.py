@@ -17,7 +17,6 @@ what failed, and when, for reproducibility/audit.
 """
 
 import json
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 

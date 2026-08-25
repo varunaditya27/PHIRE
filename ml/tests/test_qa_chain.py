@@ -7,7 +7,7 @@ modules).
 """
 
 from ml.claims.verifier import ClaimVerification
-from ml.chains.qa_chain import NO_EVIDENCE_MESSAGE, QAChain
+from ml.chains.qa_chain import MAX_FACT_EVIDENCE, NO_EVIDENCE_MESSAGE, QAChain
 from ml.rag.retriever import Chunk
 
 EVIDENCE = [Chunk(id="e1", text="evidence", metadata={
@@ -199,6 +199,63 @@ def test_answer_respects_explicit_observations_override():
     response = chain.answer("question", observations=["explicit fact"])
 
     assert response.answer == "Supported claim."
+
+
+def test_verification_pool_caps_patient_facts_at_max_fact_evidence(monkeypatch):
+    # Regression for the unbounded-pool latency risk: ClaimVerifier.verify()
+    # runs a full NLI forward pass per pool chunk per claim, so a patient
+    # with a long observation history must not push every one of those
+    # facts into the pool uncapped.
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+    seen_pools = []
+
+    class RecordingVerifier:
+        def verify(self, claim, evidence):
+            seen_pools.append(evidence)
+            return verdicts[claim]
+
+    many_facts = [f"Fact number {i}." for i in range(MAX_FACT_EVIDENCE + 25)]
+    monkeypatch.setattr("ml.chains.qa_chain.get_current_patient_facts", lambda client: many_facts)
+    monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts", lambda client: [])
+    chain = QAChain(
+        retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
+        verifier=RecordingVerifier(), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
+    )
+
+    chain.answer("question")
+
+    patient_chunks = [c for c in seen_pools[0] if c.metadata.get("source") == "patient_record"]
+    assert len(patient_chunks) == MAX_FACT_EVIDENCE
+
+
+def test_verification_pool_caps_trend_facts_independently_of_patient_facts(monkeypatch):
+    # Each list is capped on its own -- a long trend-fact list shouldn't
+    # crowd out patient facts (or vice versa) since they're capped before
+    # being combined into one pool.
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+    seen_pools = []
+
+    class RecordingVerifier:
+        def verify(self, claim, evidence):
+            seen_pools.append(evidence)
+            return verdicts[claim]
+
+    many_trends = [f"Trend number {i}." for i in range(MAX_FACT_EVIDENCE + 10)]
+    few_facts = ["LDL Cholesterol: 162 mg/dL on 2026-03-10."]
+    monkeypatch.setattr("ml.chains.qa_chain.get_current_patient_facts", lambda client: few_facts)
+    monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts", lambda client: many_trends)
+    chain = QAChain(
+        retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
+        verifier=RecordingVerifier(), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
+    )
+
+    chain.answer("question")
+
+    pool = seen_pools[0]
+    assert len([c for c in pool if c.metadata.get("source") == "patient_derived"]) == MAX_FACT_EVIDENCE
+    assert len([c for c in pool if c.metadata.get("source") == "patient_record"]) == len(few_facts)
 
 
 def test_verified_claim_has_no_source_span_when_evidence_lacks_offsets():

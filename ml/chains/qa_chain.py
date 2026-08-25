@@ -34,6 +34,21 @@ from ml.rag.retriever import Chunk, HybridRetriever
 ABSTENTION_THRESHOLD = 0.4
 NO_EVIDENCE_MESSAGE = "I don't have enough verified evidence to answer this confidently. Please consult a healthcare professional."
 
+# Hard ceiling on how many patient/trend facts enter the verification
+# pool. ClaimVerifier.verify() runs a full BART-large-MNLI forward pass
+# per (claim, pool-chunk) pair (see ml/claims/verifier.py) — with no cap,
+# a patient tracked across dozens of metrics over years turns into
+# O(claims x entire-history) NLI calls on every chat turn (found via
+# review, not hypothetical yet: get_current_patient_facts already
+# collapses to one row per metric and get_trend_facts to one row per
+# multi-reading metric, so this doesn't bite at today's few-fact scale,
+# but has no backstop once real longitudinal data accumulates). Applied
+# separately to patient facts and trend facts so one list can't crowd out
+# the other; kept generous (not a tight top-k) since, unlike the
+# retrieval candidate pool, there's no cheap relevance score to rank
+# these by before NLI runs.
+MAX_FACT_EVIDENCE = 50
+
 
 @dataclass
 class VerifiedClaim:
@@ -145,7 +160,14 @@ class QAChain:
         document chunk it was extracted from. source is carried through
         in metadata so _verify_claim can tell a direct patient fact apart
         from a precomputed trend when labeling the final status.
+
+        Truncated to MAX_FACT_EVIDENCE (see its own comment for why) --
+        logged rather than silently dropped, since a truncated fact is a
+        fact this pool can no longer verify a claim against.
         """
+        if len(facts) > MAX_FACT_EVIDENCE:
+            print(f"QAChain: capping {len(facts)} {source} facts to {MAX_FACT_EVIDENCE} for claim verification")
+            facts = facts[:MAX_FACT_EVIDENCE]
         return [
             Chunk(id=f"{source}_{i}", text=fact, metadata={"source": source, "authority": 1.0})
             for i, fact in enumerate(facts)

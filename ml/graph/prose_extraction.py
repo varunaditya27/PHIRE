@@ -18,6 +18,8 @@ import os
 
 import requests
 
+from ml.local_only import require_localhost
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("PROSE_EXTRACTION_MODEL", "qwen3.5:9b")
 
@@ -87,6 +89,7 @@ def extract_facts(text: str, model: str | None = None) -> dict:
     """
     empty_facts = {"medications": [], "conditions": [], "observations": []}
     try:
+        require_localhost(OLLAMA_HOST)
         response = requests.post(
             f"{OLLAMA_HOST}/api/generate",
             json={

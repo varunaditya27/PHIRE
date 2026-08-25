@@ -11,6 +11,14 @@ listed informally below. If `ml/` changes after this, treat this as a
 starting map, not a live contract — check the actual code for anything
 you're about to depend on precisely (function signatures, field names).
 
+**Updated 2026-08-25** (§1.1, §5): graph integration (`ml/graph/`) landed
+after this doc's original 2026-08-16 pass and changed `QAChain`'s cost/
+lifetime contract — re-read §1.1 if you read this doc before that date.
+Also this date: a live-testing pass found and fixed a real-corpus
+contamination bug (§5.8) and a document-dating bug (§5.9); see
+`docs/RESEARCH_LOG.md` for the full write-up if you want the "why," not
+just the "what."
+
 ---
 
 ## 1. The two things you actually need to call
@@ -30,20 +38,49 @@ response.claims   # list[VerifiedClaim] — full audit trail, including dropped 
 ```
 
 `VerifiedClaim` fields: `claim: str`, `status: str` (`SUPPORTED` /
-`CONFLICTING` / `UNCERTAIN` / `UNSUPPORTED`), `confidence: float` (0-1),
+`DERIVED` / `CONFLICTING` / `UNCERTAIN` / `UNSUPPORTED` — `DERIVED` added
+2026-08-25, see the graph-facts note below), `confidence: float` (0-1),
 `source_url: str | None` (public reference chunks only), `source_filename:
 str | None` (patient documents), `source_span: tuple[int, int] | None`
 (exact character offset in the source document — `None` for facts that
-aren't extracted verbatim, e.g. table rows; see §4).
+aren't extracted verbatim, e.g. table rows; see §4). A claim whose
+`source_url` and `source_filename` are **both** `None` was verified
+against a graph fact (§3), not an ingested document — that's the
+reliable way to tell "this patient's own recorded data" apart from a
+document chunk at the same authority level, found necessary during live
+testing (see `docs/RESEARCH_LOG.md` §2 for why this distinction matters
+in practice).
 
 All fields are plain Python — `dataclasses.asdict(response)` gives you a
 JSON-serializable dict directly for an API response.
 
-**Cost**: `QAChain()`'s constructor loads 4 models onto the GPU (embedding
-×2, reranker, claim verifier) — this takes a few seconds and ~2-3GB VRAM.
-Build one instance and reuse it across requests in a long-lived process;
-don't construct it per-request. `chain.answer()` itself also makes one
-Ollama call (chat generation) per question.
+**Cost / lifetime contract — updated 2026-08-25, this changed since the
+doc's original 2026-08-16 snapshot**: `QAChain()`'s constructor loads 4
+models onto the GPU (embedding ×2, reranker, claim verifier) — this
+takes a few seconds and ~2-3GB VRAM — **and** opens a `GraphClient`
+(Neo4j driver) connection. Build one instance and reuse it across
+requests in a long-lived process (e.g. at FastAPI app startup); don't
+construct it per-request — a per-request `QAChain()` would reload all 4
+models and reconnect to Neo4j on every single chat message, live-verified
+to add tens of seconds of pure model-load latency per turn.
+
+`chain.answer()` itself, per call, makes: one Ollama call (chat
+generation), one Ollama call (claim extraction, inside `ClaimExtractor`),
+and — unless you pass `observations=` explicitly to override the
+auto-fetch — three Neo4j reads (`get_patient_facts`,
+`get_current_patient_facts`, `get_trend_facts`, all against the single
+`Patient {id: "self"}` node per §3). If Neo4j is unreachable at call
+time, `answer()` raises (the Neo4j driver connects lazily on first query,
+not at `GraphClient()` construction) — there's no graceful degradation
+path today; decide at the backend layer whether a Neo4j outage should
+fail the whole chat request or fall back to `observations=[]`.
+
+Patient/trend facts pulled into claim verification are capped at 50 each
+(`ml.chains.qa_chain.MAX_FACT_EVIDENCE`) — a defensive ceiling on NLI
+verification cost, not a real limit at today's scale; if a chat response
+ever looks like it's ignoring older patient history during verification
+(as opposed to generation, which still sees full history), this cap is
+why.
 
 ### 1.2 Ingesting a patient document — `ml.rag.ingest.ingest_patient_document`
 
@@ -247,7 +284,36 @@ in that case, not a wrong guess. Check for `None` before using it.
    upload endpoint wants to surface "graph extraction partially failed"
    to the user, you'll need to check for an empty facts result yourself —
    `ml/` won't raise for you here by design (a transient LLM hiccup
-   shouldn't fail the whole document upload).
+   shouldn't fail the whole document upload). The one exception:
+   a misconfigured `OLLAMA_HOST` pointing off-box raises `ValueError`
+   from this same call path, uncaught — that's deliberate (§5.8's
+   privacy-boundary check must never silently degrade).
+8. **Keep `data/chroma` free of test/eval fixture documents.** Found live
+   2026-08-25: benchmark ingestion runs (OCR/reranker experiments) had
+   left 21 chunks from a synthetic "R. Thompson" patient permanently
+   indexed in the real Chroma store at `source: patient_document,
+   authority: 1.0` — the same authority tier as genuine patient data, so
+   they were retrievable and citable in real chat answers, and could
+   cause `ClaimVerifier` to pick a same-topic decoy chunk over the real
+   patient's own graph fact when both were "informative," producing a
+   spurious `CONFLICTING` verdict on a true claim. Removed (backed up
+   first). If you build an ingestion/eval harness that indexes into the
+   real `data/chroma` for testing, delete what you add afterward — Chroma
+   doesn't distinguish "real" from "test" data on its own, and there's no
+   automatic cleanup.
+9. **Document dates: day-first (DD/MM/YYYY), not US month-first, and DOB
+   is deliberately excluded.** `ml/graph/observations.py`'s
+   `find_document_date` parses ambiguous numeric dates day-first —
+   PHIRE's primary audience is Indian users/clinics, where that's the
+   normal convention, so `"03/01/2026"` means 3 January, not March 1st.
+   It also explicitly skips any date immediately labeled `DOB`/`Date of
+   Birth` — found live 2026-08-25 that a document listing DOB before its
+   own service date (a realistic layout: demographics header, then visit
+   details) silently misdated every Observation from that document to
+   the patient's birth year under the original first-ISO-match
+   implementation. If you write any date-parsing of your own against
+   patient-uploaded documents, use the same day-first + DOB-exclusion
+   convention for consistency, or better, reuse this function.
 
 ---
 

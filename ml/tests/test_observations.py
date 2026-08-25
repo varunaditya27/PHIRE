@@ -3,7 +3,7 @@ Unit tests for ml/graph/observations.py's build logic (pure, no Neo4j
 dependency). See test_graph_integration.py for the live write path.
 """
 
-from ml.graph.observations import _split_value, build_prose_observations, build_table_observations, find_document_date
+from ml.graph.observations import _split_value, build_prose_observations, build_table_observations
 
 TABLE_HTML = (
     "<table>\n"
@@ -27,14 +27,23 @@ def test_split_value_returns_none_for_unparseable_value():
     assert _split_value("N/A") == (None, None)
 
 
-def test_find_document_date_extracts_iso_date():
-    text = "Riverside Medical Group\nDate of Service: 2026-03-01\n\nSodium: 138 mEq/L"
-    assert find_document_date(text) == "2026-03-01"
+def test_split_value_handles_negative_numbers():
+    # A legitimately negative lab value (e.g. base excess on a blood gas
+    # panel) must still parse as numeric, not silently drop out of every
+    # value-based feature (trend deltas, latest-value dedup).
+    assert _split_value("-3.2 mEq/L") == (-3.2, "mEq/L")
+    assert _split_value("-5") == (-5.0, None)
 
 
-def test_find_document_date_falls_back_to_today_when_absent():
-    from datetime import date
-    assert find_document_date("no date anywhere in this text") == date.today().isoformat()
+def test_split_value_returns_none_for_a_compound_blood_pressure_reading():
+    # Regression: this used to silently truncate to (148.0, "/92 mmHg")
+    # -- a wrong, half-discarded value with a corrupted unit, since
+    # _VALUE_RE matched the leading systolic number and swallowed the
+    # rest as "unit." A compound reading isn't representable by this
+    # schema's single value+unit pair, so it must come back unparseable,
+    # like "N/A" -- not a plausible-looking wrong number.
+    assert _split_value("148/92 mmHg") == (None, None)
+    assert _split_value("120/80") == (None, None)
 
 
 def test_build_table_observations_from_test_result_table():

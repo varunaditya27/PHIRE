@@ -9,6 +9,7 @@ depend on every caller remembering not to point this at a remote host.
 """
 
 import os
+from typing import Self
 
 from neo4j import Driver, GraphDatabase
 
@@ -35,7 +36,7 @@ class GraphClient:
     def close(self) -> None:
         self._driver.close()
 
-    def __enter__(self) -> "GraphClient":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info) -> None:

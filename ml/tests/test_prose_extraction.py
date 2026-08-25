@@ -9,6 +9,7 @@ failure, not retesting the model itself).
 
 import json
 
+import pytest
 import requests
 
 import ml.graph.prose_extraction as prose_extraction
@@ -83,3 +84,34 @@ def test_extract_facts_degrades_to_empty_when_parsed_json_is_not_an_object(monke
     )
 
     assert extract_facts("some text") == {"medications": [], "conditions": [], "observations": []}
+
+
+def test_extract_facts_refuses_a_non_localhost_host(monkeypatch):
+    # A misconfigured OLLAMA_HOST must fail loudly (raise), not silently
+    # degrade to empty facts and not send clinical note text off-box --
+    # this is PHIRE's core "no cloud APIs, no external LLM calls, ever"
+    # invariant, and extract_facts runs on the most PHI-sensitive text in
+    # the codebase (free-text clinical notes). require_localhost's
+    # ValueError is deliberately outside the except clause's caught
+    # exception types (requests.RequestException, KeyError,
+    # json.JSONDecodeError) so it can't be swallowed like a normal
+    # network/parse failure.
+    monkeypatch.setattr(prose_extraction, "OLLAMA_HOST", "http://evil.example:11434")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("requests.post must not be called for a non-localhost host")
+
+    monkeypatch.setattr(prose_extraction.requests, "post", fail_if_called)
+
+    with pytest.raises(ValueError, match="localhost"):
+        extract_facts("some text")
+
+
+def test_extract_facts_refuses_localhost_lookalike_hostname(monkeypatch):
+    # The exact bypass require_localhost itself was built to close (see
+    # test_local_only.py): a hostname that merely starts with/contains
+    # "localhost" without actually resolving there.
+    monkeypatch.setattr(prose_extraction, "OLLAMA_HOST", "http://localhost.attacker.example:11434")
+
+    with pytest.raises(ValueError, match="localhost"):
+        extract_facts("some text")

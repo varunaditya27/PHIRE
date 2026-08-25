@@ -18,39 +18,53 @@ via MERGE rather than duplicating them.
 """
 
 import re
-from datetime import date
 
 from ml.graph.client import GraphClient
+from ml.graph.document_dates import find_document_date
 from ml.graph.metric_resolver import resolve_metric
 from ml.rag.ingest.table_parsing import find_table_blocks, parse_table_rows
 
 DEFAULT_PATIENT_ID = "self"
 
-_VALUE_RE = re.compile(r"^([\d.]+)\s*(.*)$")
-_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+# Leading "-" is optional but real: some panels (e.g. base excess on a
+# blood gas panel) report legitimately negative values -- found via
+# review, "-3.2 mEq/L" silently failed to parse as numeric under a
+# digit/dot-only pattern, dropping that observation out of every
+# value-based feature (trend deltas, latest-value dedup) even though its
+# raw_value was still stored.
+_VALUE_RE = re.compile(r"^(-?[\d.]+)\s*(.*)$")
+
+# A compound reading ("148/92 mmHg" -- systolic/diastolic blood pressure)
+# isn't representable by this schema's single value+unit pair. Without
+# this guard, _VALUE_RE still matched the leading number and silently
+# truncated to (148.0, "/92 mmHg") -- a wrong, half-discarded value with
+# a corrupted unit string, not a graceful "unparseable." Found via review:
+# metric_resolver.py already aliases "Blood Pressure"/"bp" as an
+# anticipated real metric, so prose extraction on a real progress note
+# ("...148/92 mmHg") reaches this. Excluded explicitly (returns
+# unparseable, like "N/A") rather than guessing which number to keep --
+# representing blood pressure properly needs a two-value schema decision,
+# which is a scope call for GRAPH_SCHEMA_ROADMAP.md, not something to
+# silently half-implement here.
+_COMPOUND_VALUE_RE = re.compile(r"^-?\d+(\.\d+)?\s*/\s*-?\d+(\.\d+)?")
 
 
 def _split_value(raw_value: str) -> tuple[float | None, str | None]:
-    """Split "138 mEq/L" into (138.0, "mEq/L") for numeric querying; (None, None) if unparseable."""
-    match = _VALUE_RE.match(raw_value.strip())
+    """Split "138 mEq/L" into (138.0, "mEq/L") for numeric querying; (None, None) if unparseable.
+
+    (None, None) for a compound "systolic/diastolic" reading too, not a
+    truncated single number -- see _COMPOUND_VALUE_RE.
+    """
+    stripped = raw_value.strip()
+    if _COMPOUND_VALUE_RE.match(stripped):
+        return None, None
+    match = _VALUE_RE.match(stripped)
     if not match:
         return None, None
     try:
         return float(match.group(1)), (match.group(2).strip() or None)
     except ValueError:
         return None, None
-
-
-def find_document_date(text: str) -> str:
-    """Best-effort clinical date from the document's own text (e.g. "Date of Service: 2026-03-01").
-
-    Falls back to today's date if none is found — an observation without
-    any date is worse than one dated at ingestion time, since the whole
-    point of this graph is time-series queries. Shared by
-    medications.py/conditions.py too, not just table-derived Observations.
-    """
-    match = _DATE_RE.search(text)
-    return match.group(1) if match else date.today().isoformat()
 
 
 def _stable_id(document_id: str, code: str) -> str:

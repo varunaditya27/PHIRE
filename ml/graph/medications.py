@@ -11,7 +11,8 @@ value/unit/reference_range (see docs/GRAPH_SCHEMA_ROADMAP.md section 3e).
 """
 
 from ml.graph.client import GraphClient
-from ml.graph.observations import DEFAULT_PATIENT_ID, find_document_date
+from ml.graph.document_dates import find_document_date
+from ml.graph.observations import DEFAULT_PATIENT_ID
 
 
 def build_medications(

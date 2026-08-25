@@ -9,6 +9,7 @@ namespace), doesn't touch "self" or any other real data in the graph.
 """
 
 import pytest
+from neo4j.exceptions import ServiceUnavailable
 
 from ml.graph.client import GraphClient
 from ml.graph.conditions import build_conditions, write_conditions
@@ -28,7 +29,20 @@ TABLE_HTML = (
 
 @pytest.fixture
 def graph_client():
+    # Skip (not error) when no local Neo4j is reachable -- without this, a
+    # fresh clone or a CI run without Neo4j running fails every test in
+    # this file with a raw connection traceback, which reads as
+    # unrelated infra noise rather than "this coverage didn't run" (found
+    # via review: this file's tests are the only coverage for
+    # conditions.py/medications.py/patient_context.py's write and read
+    # paths, so a silent skip-that-looks-like-a-pass or an error dismissed
+    # as noise both hide a real gap).
     client = GraphClient()
+    try:
+        client.run("RETURN 1")
+    except ServiceUnavailable as exc:
+        client.close()
+        pytest.skip(f"Neo4j not reachable at {client.uri} -- skipping graph integration tests: {exc}")
     yield client
     client.run("MATCH (p:Patient {id: $id})-[*0..2]-(n) DETACH DELETE p, n", id=TEST_PATIENT_ID)
     client.close()
