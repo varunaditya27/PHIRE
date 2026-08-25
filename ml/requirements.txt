@@ -20,6 +20,9 @@ requests==2.34.2     # direct dep in ml/rag/ingest (PubMed/MedlinePlus/USDA APIs
 pypdf==6.16.1        # text extraction from text-based PDF lab reports/records
 pillow==12.3.0        # image preprocessing for the OCR extractor + eval fixture generation
                        # (ml/rag/ingest/experiments/eval_data/generate_images.py)
+rapidocr-onnxruntime==1.4.4  # cheap CPU-only OCR pre-pass, routes a PDF page to the
+                              # full olmOCR pass only when it disagrees with pypdf's
+                              # text layer — see ml/rag/ingest/router_experiments/RESULTS.md
 
 # --- Graph RAG (longitudinal + relational retrieval, see
 #     docs/DATASETS_AND_GRAPH_RAG.md) ---
