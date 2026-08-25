@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from ml.claims.confidence import compute_confidence
 from ml.claims.extractor import ClaimExtractor
 from ml.claims.verifier import ClaimVerifier
+from ml.graph.client import GraphClient
+from ml.graph.patient_context import get_current_patient_facts, get_patient_facts, get_trend_facts
 from ml.llm.ollama_client import OllamaClient
 from ml.llm.prompt_builder import build_chat_prompt
 from ml.rag.reranker import Reranker
@@ -72,15 +74,25 @@ class QAChain:
         extractor: ClaimExtractor | None = None,
         verifier: ClaimVerifier | None = None,
         llm_client: OllamaClient | None = None,
+        graph_client: GraphClient | None = None,
     ) -> None:
         self._retriever = retriever or HybridRetriever()
         self._reranker = reranker or Reranker()
         self._extractor = extractor or ClaimExtractor()
         self._verifier = verifier or ClaimVerifier()
         self._llm = llm_client or OllamaClient()
+        self._graph_client = graph_client or GraphClient()
 
     def answer(self, question: str, observations: list[str] | None = None, top_k: int = 5) -> ChatResponse:
-        """Run the full retrieve -> generate -> verify -> abstain pipeline for one question."""
+        """Run the full retrieve -> generate -> verify -> abstain pipeline for one question.
+
+        observations defaults to the patient's current graph state
+        (ml/graph/patient_context.py) -- callers only need to pass it
+        explicitly to override that default (e.g. tests).
+        """
+        if observations is None:
+            observations = get_patient_facts(self._graph_client) + get_trend_facts(self._graph_client)
+
         # Wide candidate pool before reranking, not just top_k*2: a
         # specific patient fact (one line, narrow match) competes against
         # hundreds of topically-similar general reference chunks on pure
@@ -96,10 +108,48 @@ class QAChain:
         prompt = build_chat_prompt(question, evidence, observations)
         draft_answer = self._llm.generate(prompt)
 
-        verified = [self._verify_claim(claim, evidence) for claim in self._extractor.extract(draft_answer)]
-        supported = [c for c in verified if c.status == "SUPPORTED" and c.confidence >= ABSTENTION_THRESHOLD]
+        # A claim restating a patient fact ("your LDL was 162 mg/dL") needs
+        # to be checked against that fact, not just against reference
+        # literature -- without this, a claim built entirely from
+        # observations always came back UNCERTAIN, since no chunk in
+        # evidence could ever entail it (verified live: this is what
+        # actually happened before this fix). Uses get_current_patient_facts
+        # (latest value per metric), not the full-history `observations`
+        # list used for the prompt above -- checking against every past
+        # value of a metric makes NLI flag an old reading as contradicting
+        # a new one (also verified live). Listed first so a patient fact
+        # wins ties over a topically-similar reference chunk when both
+        # score similarly informative.
+        patient_evidence = self._facts_to_chunks(get_current_patient_facts(self._graph_client), source="patient_record")
+        # A trend claim ("your LDL increased 29 points") is arithmetic on
+        # two Observations, not something NLI can verify against a single
+        # fact sentence -- get_trend_facts precomputes the delta as its
+        # own checkable sentence, tagged patient_derived so _verify_claim
+        # can relabel a match here as DERIVED rather than SUPPORTED (see
+        # ml/claims/verifier.py's docstring for why DERIVED can't be
+        # implemented as an NLI-only distinction).
+        derived_evidence = self._facts_to_chunks(get_trend_facts(self._graph_client), source="patient_derived")
+        verification_pool = patient_evidence + derived_evidence + evidence
+
+        verified = [self._verify_claim(claim, verification_pool) for claim in self._extractor.extract(draft_answer)]
+        supported = [c for c in verified if c.status in ("SUPPORTED", "DERIVED") and c.confidence >= ABSTENTION_THRESHOLD]
         answer = " ".join(c.claim for c in supported) if supported else NO_EVIDENCE_MESSAGE
         return ChatResponse(answer=answer, claims=verified)
+
+    @staticmethod
+    def _facts_to_chunks(facts: list[str], source: str) -> list[Chunk]:
+        """Wrap plain-text graph facts as Chunks so the verifier can check claims against them.
+
+        authority=1.0 matches PATIENT_DOCUMENT_AUTHORITY (reranker.py) --
+        a structured graph fact is at least as authoritative as the raw
+        document chunk it was extracted from. source is carried through
+        in metadata so _verify_claim can tell a direct patient fact apart
+        from a precomputed trend when labeling the final status.
+        """
+        return [
+            Chunk(id=f"{source}_{i}", text=fact, metadata={"source": source, "authority": 1.0})
+            for i, fact in enumerate(facts)
+        ]
 
     def _verify_claim(self, claim: str, evidence: list[Chunk]) -> VerifiedClaim:
         """Verify one claim and fold its verdict into a confidence score + source citation."""
@@ -108,10 +158,19 @@ class QAChain:
         metadata = verification.evidence.metadata if verification.evidence else {}
         authority = metadata.get("authority", 0.0)
         confidence = compute_confidence(verification.entailment_prob, verification.contradiction_prob, rank, authority)
+        status = verification.status
+        # A SUPPORTED match against a patient_derived chunk means the
+        # claim restated a precomputed trend (arithmetic PHIRE already
+        # did), not a direct fact or reference-backed statement -- relabel
+        # so the caller can distinguish "this is a computed delta" from
+        # "this is a directly observed value" (docs/PHIRE_STRUCTURED_GRAPH_MEDICAL_CORPUS_IMPLEMENTATION.md
+        # section 33's DIRECT FACT vs DERIVED distinction).
+        if status == "SUPPORTED" and metadata.get("source") == "patient_derived":
+            status = "DERIVED"
         source_span = None
         if "char_start" in metadata and "char_end" in metadata:
             source_span = (metadata["char_start"], metadata["char_end"])
         return VerifiedClaim(
-            claim=claim, status=verification.status, confidence=confidence,
+            claim=claim, status=status, confidence=confidence,
             source_url=metadata.get("url"), source_filename=metadata.get("filename"), source_span=source_span,
         )

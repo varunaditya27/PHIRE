@@ -46,6 +46,13 @@ class FakeLLM:
         return "draft answer text"
 
 
+class FakeGraphClient:
+    """Stands in for GraphClient: get_patient_facts only ever calls .run()."""
+
+    def run(self, query, **params):
+        return []
+
+
 def build_chain(claims, verdicts) -> QAChain:
     return QAChain(
         retriever=FakeRetriever(),
@@ -53,6 +60,7 @@ def build_chain(claims, verdicts) -> QAChain:
         extractor=FakeExtractor(claims),
         verifier=FakeVerifier(verdicts),
         llm_client=FakeLLM(),
+        graph_client=FakeGraphClient(),
     )
 
 
@@ -99,6 +107,98 @@ def test_verified_claim_carries_source_span_from_evidence():
     response = chain.answer("question")
 
     assert response.claims[0].source_span == (10, 18)
+
+
+def test_answer_fetches_graph_facts_when_observations_not_given(monkeypatch):
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+    chain = build_chain(claims, verdicts)
+
+    seen_prompts = []
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.build_chat_prompt",
+        lambda question, evidence, observations: seen_prompts.append(observations) or "prompt",
+    )
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.get_patient_facts", lambda client: ["LDL Cholesterol: 149 mg/dL on 2026-08-14."],
+    )
+
+    chain.answer("question")
+
+    assert seen_prompts == [["LDL Cholesterol: 149 mg/dL on 2026-08-14."]]
+
+
+def test_verify_claim_pool_includes_patient_facts_alongside_reference_evidence(monkeypatch):
+    # The bug this fixes: a claim built entirely from a patient observation
+    # ("your LDL was 162 mg/dL") had nothing to verify against, because
+    # observations never reached the verifier -- only reranked reference
+    # chunks did. Confirms patient facts are now in the pool _verify_claim
+    # actually checks against.
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+    seen_pools = []
+
+    class RecordingVerifier:
+        def verify(self, claim, evidence):
+            seen_pools.append(evidence)
+            return verdicts[claim]
+
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.get_current_patient_facts",
+        lambda client: ["LDL Cholesterol: 162 mg/dL on 2026-03-10."],
+    )
+    chain = QAChain(
+        retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
+        verifier=RecordingVerifier(), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
+    )
+
+    chain.answer("question")
+
+    pool_texts = [c.text for c in seen_pools[0]]
+    assert "LDL Cholesterol: 162 mg/dL on 2026-03-10." in pool_texts
+    assert "evidence" in pool_texts  # the reference chunk is still in the pool too
+
+
+def test_answer_relabels_supported_trend_claim_as_derived(monkeypatch):
+    claim = "My LDL Cholesterol decreased by 29.0 mg/dL."
+    verdicts = {claim: ClaimVerification(claim, "SUPPORTED", 0.9, 0.0, None)}  # evidence filled in below
+
+    class RecordingVerifier:
+        def verify(self, claim, evidence):
+            # Mimic the real verifier: whichever chunk in the pool is the
+            # trend fact "wins" (it's the only one relevant to this claim).
+            trend_chunk = next(c for c in evidence if c.metadata.get("source") == "patient_derived")
+            return ClaimVerification(claim, "SUPPORTED", 0.9, 0.0, trend_chunk)
+
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.get_current_patient_facts", lambda client: [],
+    )
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.get_trend_facts",
+        lambda client: ["LDL Cholesterol changed from 191 mg/dL to 162 mg/dL (a decrease of 29.0 mg/dL)."],
+    )
+    chain = QAChain(
+        retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor([claim]),
+        verifier=RecordingVerifier(), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
+    )
+
+    response = chain.answer("question")
+
+    assert response.claims[0].status == "DERIVED"
+    assert response.answer == claim  # DERIVED counts as verified, makes it into the final answer
+
+
+def test_answer_respects_explicit_observations_override():
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+    chain = build_chain(claims, verdicts)
+
+    # Doesn't raise even though FakeGraphClient.run() would return []
+    # for the auto-fetch path -- passing observations explicitly skips
+    # the graph fetch entirely.
+    response = chain.answer("question", observations=["explicit fact"])
+
+    assert response.answer == "Supported claim."
 
 
 def test_verified_claim_has_no_source_span_when_evidence_lacks_offsets():

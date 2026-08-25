@@ -80,3 +80,18 @@ def test_build_prose_observations_from_extracted_facts():
 def test_build_prose_observations_skips_entries_missing_name_or_value():
     raw = [{"name": "", "value": "0.48"}, {"name": "Something"}]
     assert build_prose_observations(raw, "no date here", document_id="doc456") == []
+
+
+def test_build_table_observations_canonicalizes_metric_names():
+    # The exact bug found live: a table using "LDL" as its column value
+    # and another document's table using "LDL Cholesterol" produced two
+    # separate Observation nodes for the same lab test.
+    table = "<table><tr><th>Test</th><th>Result</th></tr><tr><td>LDL</td><td>162 mg/dL</td></tr></table>"
+    observations = build_table_observations(table, document_id="doc1", effective_date="2026-03-10")
+    assert observations[0]["code"] == "LDL Cholesterol"
+
+
+def test_build_prose_observations_canonicalizes_metric_names():
+    raw = [{"name": "LDL cholesterol", "value": "191 mg/dL"}]
+    observations = build_prose_observations(raw, "text", document_id="doc2", effective_date="2026-03-01")
+    assert observations[0]["code"] == "LDL Cholesterol"

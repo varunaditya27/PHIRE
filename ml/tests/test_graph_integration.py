@@ -14,6 +14,7 @@ from ml.graph.client import GraphClient
 from ml.graph.conditions import build_conditions, write_conditions
 from ml.graph.medications import build_medications, write_medications
 from ml.graph.observations import build_table_observations, write_observations
+from ml.graph.patient_context import get_current_patient_facts, get_patient_facts, get_trend_facts
 
 TEST_PATIENT_ID = "test_patient_graph_integration"
 
@@ -92,3 +93,82 @@ def test_write_and_read_back_condition(graph_client):
     )
 
     assert rows == [{"code": "hypertension", "status": "active", "filename": "note.jpg"}]
+
+
+def test_get_patient_facts_reads_back_everything_as_sentences(graph_client):
+    observations = build_table_observations(
+        f"Riverside Medical Group\nDate of Service: 2026-03-01\n\n{TABLE_HTML}", document_id="integration_doc",
+    )
+    write_observations(graph_client, "integration_doc", "test.pdf", observations, patient_id=TEST_PATIENT_ID)
+    medications = build_medications(
+        [{"name": "lisinopril", "dosage": "20mg", "frequency": "daily", "status": "started"}],
+        "Plan: increase lisinopril to 20mg daily.", document_id="integration_doc",
+    )
+    write_medications(graph_client, "integration_doc", "note.jpg", medications, patient_id=TEST_PATIENT_ID)
+    conditions = build_conditions(
+        [{"name": "hypertension", "status": "active"}], "Follow-up of hypertension.", document_id="integration_doc",
+    )
+    write_conditions(graph_client, "integration_doc", "note.jpg", conditions, patient_id=TEST_PATIENT_ID)
+
+    facts = get_patient_facts(graph_client, patient_id=TEST_PATIENT_ID)
+
+    assert "Potassium: 5.4 mEq/L (reference range 3.5-5.0) -- High on 2026-03-01." in facts
+    assert "Medication: lisinopril 20mg daily (started)." in facts
+    assert "Condition: hypertension (active)." in facts
+
+
+def test_get_patient_facts_empty_for_unknown_patient(graph_client):
+    assert get_patient_facts(graph_client, patient_id="no_such_patient") == []
+
+
+def test_get_current_patient_facts_keeps_only_latest_value_per_metric(graph_client):
+    # Same lab test recorded twice for this patient, different dates and
+    # values -- get_patient_facts should show both (full history for
+    # generation); get_current_patient_facts should show only the newer
+    # one (single current value for verification).
+    older = build_table_observations(
+        "<table><tr><th>Test</th><th>Result</th></tr><tr><td>LDL</td><td>191 mg/dL</td></tr></table>",
+        document_id="doc_older", effective_date="2026-03-01",
+    )
+    newer = build_table_observations(
+        "<table><tr><th>Test</th><th>Result</th></tr><tr><td>LDL Cholesterol</td><td>162 mg/dL</td></tr></table>",
+        document_id="doc_newer", effective_date="2026-03-10",
+    )
+    write_observations(graph_client, "doc_older", "old.pdf", older, patient_id=TEST_PATIENT_ID)
+    write_observations(graph_client, "doc_newer", "new.pdf", newer, patient_id=TEST_PATIENT_ID)
+
+    full_history = get_patient_facts(graph_client, patient_id=TEST_PATIENT_ID)
+    current_only = get_current_patient_facts(graph_client, patient_id=TEST_PATIENT_ID)
+
+    assert sum("LDL Cholesterol" in f for f in full_history) == 2
+    assert sum("LDL Cholesterol" in f for f in current_only) == 1
+    assert "162 mg/dL" in current_only[0]
+
+
+def test_get_trend_facts_computes_change_between_latest_two_readings(graph_client):
+    older = build_table_observations(
+        "<table><tr><th>Test</th><th>Result</th></tr><tr><td>LDL</td><td>191 mg/dL</td></tr></table>",
+        document_id="doc_older", effective_date="2025-03-01",
+    )
+    newer = build_table_observations(
+        "<table><tr><th>Test</th><th>Result</th></tr><tr><td>LDL Cholesterol</td><td>162 mg/dL</td></tr></table>",
+        document_id="doc_newer", effective_date="2026-03-10",
+    )
+    write_observations(graph_client, "doc_older", "old.pdf", older, patient_id=TEST_PATIENT_ID)
+    write_observations(graph_client, "doc_newer", "new.pdf", newer, patient_id=TEST_PATIENT_ID)
+
+    trends = get_trend_facts(graph_client, patient_id=TEST_PATIENT_ID)
+
+    assert len(trends) == 1
+    assert "LDL Cholesterol" in trends[0]
+    assert "decrease of 29.0" in trends[0]
+
+
+def test_get_trend_facts_empty_when_metric_has_only_one_reading(graph_client):
+    observations = build_table_observations(
+        "<table><tr><th>Test</th><th>Result</th></tr><tr><td>Sodium</td><td>138 mEq/L</td></tr></table>",
+        document_id="doc_solo", effective_date="2026-03-01",
+    )
+    write_observations(graph_client, "doc_solo", "solo.pdf", observations, patient_id=TEST_PATIENT_ID)
+
+    assert get_trend_facts(graph_client, patient_id=TEST_PATIENT_ID) == []

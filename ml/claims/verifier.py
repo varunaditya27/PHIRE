@@ -8,15 +8,24 @@ beating both medical-specialized models. See
 ml/claims/experiments/RESULTS.md for the full comparison, spot-check of
 *why* the general model won, and limitations.
 
-v1 status taxonomy: SUPPORTED, CONFLICTING, UNCERTAIN, UNSUPPORTED.
+v1 status taxonomy this module itself produces: SUPPORTED, CONFLICTING,
+UNCERTAIN, UNSUPPORTED — a single NLI entailment score can't reliably
+distinguish "directly restates the evidence" from "requires reasoning
+beyond it," so this module doesn't try to.
+
 DERIVED (claim requires computing something from raw values, e.g. "LDL
-increased" from two separate numbers) and INFERRED (claim requires
-multi-hop reasoning beyond direct restatement) are NOT implemented — a
-single NLI entailment score can't reliably distinguish "directly restates
-the evidence" from "requires reasoning beyond it," and approximating that
-distinction without a validated signal would be worse than being explicit
-about the gap. Both collapse into SUPPORTED for now if the evidence text
-happens to entail the claim, or UNCERTAIN otherwise.
+increased 29 points" from two separate Observations) IS implemented, but
+one layer up: ml/graph/patient_context.py's get_trend_facts() precomputes
+the arithmetic as its own checkable sentence, and
+ml/chains/qa_chain.py's QAChain._verify_claim relabels a SUPPORTED verdict
+against that sentence as DERIVED. This module never sees a DERIVED
+status — it only ever returns the four above.
+
+INFERRED (claim requires multi-hop reasoning beyond direct restatement or
+simple arithmetic) is NOT implemented anywhere yet — no validated signal
+exists for it, and approximating that distinction without one would be
+worse than being explicit about the gap. Collapses into SUPPORTED if the
+matched evidence happens to entail the claim, or UNCERTAIN otherwise.
 """
 
 import os

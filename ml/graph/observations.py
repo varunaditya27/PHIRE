@@ -21,6 +21,7 @@ import re
 from datetime import date
 
 from ml.graph.client import GraphClient
+from ml.graph.metric_resolver import resolve_metric
 from ml.rag.ingest.table_parsing import find_table_blocks, parse_table_rows
 
 DEFAULT_PATIENT_ID = "self"
@@ -81,6 +82,7 @@ def build_table_observations(
             code, raw_value = row.get("Test"), row.get("Result")
             if not code or not raw_value:
                 continue
+            code = resolve_metric(code)
             value, unit = _split_value(raw_value)
             observations.append({
                 "id": _stable_id(document_id, code),
@@ -105,6 +107,7 @@ def build_prose_observations(
         code, raw_value = obs.get("name"), obs.get("value")
         if not code or not raw_value:
             continue
+        code = resolve_metric(code)
         value, unit = _split_value(raw_value)
         result.append({
             "id": _stable_id(document_id, code),
