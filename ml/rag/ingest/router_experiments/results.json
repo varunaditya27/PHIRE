@@ -1,0 +1,158 @@
+[
+  {
+    "model": "RapidOCR",
+    "cer": 0.1304,
+    "wer": 0.3866,
+    "content_cer": 0.0712,
+    "content_wer": 0.3866,
+    "field_accuracy": 0.5694,
+    "latency_seconds": 1.317,
+    "confidence": 0.9676,
+    "per_item": [
+      {
+        "id": "cmp_table_clean",
+        "variant": "clean",
+        "cer": 0.1031,
+        "wer": 0.1186,
+        "content_cer": 0.0131,
+        "content_wer": 0.1186,
+        "field_accuracy": 1.0,
+        "latency_seconds": 1.87,
+        "confidence": 0.9898,
+        "text": "Riverside Medical Group - Comprehensive Metabolic Panel\nPatient:R.Thompson\nDateofService:2026-03-01\nTest\nResult\nReference Range\nFlag\nSodium\n138 mEq/L\n136-145\nNormal\nPotassium\n5.4 mEq/L\n3.5-5.0\nHigh\nChloride\n101 mEq/L\n98-107\nNormal\nCO2\n24 mEq/L\n23-29\nNormal\nBUN\n22 mg/dL\n7-20\nHigh\nCreatinine\n1.3 mg/dL\n0.6-1.2\nHigh\nGlucose\n118 mg/dL\n70-99\nHigh\nCalcium\n9.1 mg/dL\n8.5-10.2\nNormal"
+      },
+      {
+        "id": "cmp_table_photo",
+        "variant": "photo",
+        "cer": 0.1392,
+        "wer": 0.4746,
+        "content_cer": 0.0499,
+        "content_wer": 0.4746,
+        "field_accuracy": 0.0,
+        "latency_seconds": 1.5687,
+        "confidence": 0.9737,
+        "text": "Riverside Medical Group-ComprehensiveMetabolicPanel\nPatient:R.Thompson\nDateofService:2026-03-01\nTest\nResult\nReference Range\nFlag\nSodium\n138mEq/L\n136-145\nNormal\nPotassium\n5.4mEq/L\n3.5-5.0\nHigh\nChloride\n101mEq/L\n98-107\nNormal\nCO2\n24mEq/L\n23-29\nNormal\nBUN\n22mg/dL\n7-20\nHigh\nCreatinine\n1.3mg/dl\n0.6-1.2\nHigh\nGlucose\n118mg/dl\n70-99\nHigh\nCalcium\n9.1mg/dL\n8.5-10.2\nNormal"
+      },
+      {
+        "id": "vaccine_record_clean",
+        "variant": "clean",
+        "cer": 0.0884,
+        "wer": 0.1282,
+        "content_cer": 0.0105,
+        "content_wer": 0.1282,
+        "field_accuracy": 1.0,
+        "latency_seconds": 0.9865,
+        "confidence": 0.9923,
+        "text": "Riverside Medical Group - Immunization Record\nPatient:R.Thompson\nPrinted:2026-03-01\nVaccine\nDate\nLot #\nSite\nInfluenza\n2025-10-12\nAB1234\nLeft deltoid\nTdap\n2024-06-03\nCD5678\nRight deltoid\nCOVID-19 (bivalent)\n2025-01-15\nEF9012\nLeft deltoid\nShingrix dose 2\n2025-09-20\nGH3456\nRight deltoid"
+      },
+      {
+        "id": "vaccine_record_photo",
+        "variant": "photo",
+        "cer": 0.3571,
+        "wer": 0.641,
+        "content_cer": 0.2927,
+        "content_wer": 0.641,
+        "field_accuracy": 0.5,
+        "latency_seconds": 1.0072,
+        "confidence": 0.9695,
+        "text": "Riverside Medical Group-Immunization Record\nPatient:R.Thompson\nPrinted:2026-03-01\nLot#\nSite\nVaccine\nDate\nAB1234\nLeftdeltoid\nInfluenza\n2025-10-12\nCD5678\nRight deltoid\nTdap\n2024-06-03\nEF9012\nLeft deltoid\nCOVID-19(bivalent)\n2025-01-15\nGH3456\nRight deltoid\nShingrixdose2\n2025-09-20"
+      },
+      {
+        "id": "demographics_vitals_clean",
+        "variant": "clean",
+        "cer": 0.1358,
+        "wer": 0.275,
+        "content_cer": 0.0246,
+        "content_wer": 0.275,
+        "field_accuracy": 1.0,
+        "latency_seconds": 0.5569,
+        "confidence": 0.9693,
+        "text": "Riverside Medical Group-Visit Summary\nName: R.Thompson\nMRN:00482913\nDOB: 1978-04-22\nInsurance: BlueShield PPO\nSex: F\nVisit Date:2026-03-01\nVital\nValue\nBlood Pressure\n142/91 mmHg\nHeart Rate\n88 bpm\nTemperature\n98.9F\nSpO2\n97 %\nBMI\n31.8 kg/m2"
+      },
+      {
+        "id": "demographics_vitals_photo",
+        "variant": "photo",
+        "cer": 0.1774,
+        "wer": 0.75,
+        "content_cer": 0.0697,
+        "content_wer": 0.75,
+        "field_accuracy": 0.6667,
+        "latency_seconds": 0.7212,
+        "confidence": 0.9679,
+        "text": "RiversideMedical Group-Visit Summary\nName:R.Thompson\nMRN:00482913\nDOB:1978-04-22\nInsurance:BlueShield PPO\nSexF\nVisit Date:2026-03-01\nVital\nValue\nBloodPressure\n142/91mmHg\nHeart Rate\n88bpm\nTemperature\n98.9F\nSpO2\n97%\nBMI\n31.8kg/m2"
+      },
+      {
+        "id": "progress_note_clean",
+        "variant": "clean",
+        "cer": 0.0311,
+        "wer": 0.0235,
+        "content_cer": 0.0017,
+        "content_wer": 0.0235,
+        "field_accuracy": 1.0,
+        "latency_seconds": 1.7249,
+        "confidence": 0.987,
+        "text": "Riverside Medical Group - Office Visit Note\nPatient: R. Thompson\nDate:2026-03-01\nPatient is a 54-year-old presenting for follow-up of\nhypertension and hyperlipidemia. Blood pressure remains\nelevated at today's visit despite adherence to the current\nantihypertensive regimen. Lipid panel from last month showed\npersistent elevation in LDL cholesterol at 191 mg/dL.\nPlan: increase lisinopril to 20mg daily, add atorvastatin\n40mg at bedtime, recheck basic metabolic panel and lipid\npanel in 6 weeks. Patient counseled extensively on dietary\nsodium restriction and the importance of medication\nadherence."
+      },
+      {
+        "id": "progress_note_photo",
+        "variant": "photo",
+        "cer": 0.0836,
+        "wer": 0.5059,
+        "content_cer": 0.0549,
+        "content_wer": 0.5059,
+        "field_accuracy": 0.3333,
+        "latency_seconds": 1.3193,
+        "confidence": 0.9221,
+        "text": "Riverside Medical Group-Ofice Visit Note\nPatieot:R.Thompson\nDate:2026-03-01\nPatient s a 54-year-old presenting for follow-up of\nhypertension and hyperlipidemia. Blood pressure remains\nelevated at today'svisitdespiteadherence to the curent\nantihypertensiveregimen.Lipid panel from last month showed\npersistent elevation inLDLcholesterolat 191 mg/dL\nPlan:increaselisinopril to20mg daily,add atorvastatn\n40mgatbedtime,recheckbasicmetabolicpanel and lipid\npanel in 6weeks.Patientcounseled extensively on dietary\nsodium restriction and the importanceof medication\nadherence."
+      },
+      {
+        "id": "radiology_report_clean",
+        "variant": "clean",
+        "cer": 0.0467,
+        "wer": 0.1552,
+        "content_cer": 0.0159,
+        "content_wer": 0.1552,
+        "field_accuracy": 1.0,
+        "latency_seconds": 1.4118,
+        "confidence": 0.9818,
+        "text": "Riverside Medical Group - Radiology Report\nCHESTX-RAY,PAANDLATERALVIEWS\nPatient: R. Thompson\nDate: 2026-02-20\nCLINICAL HISTORY: Cough and shortness of breath.\nFINDINGS: The lungs are clear without focal consolidation,\neffusion, or pneumothorax. Cardiomediastinal silhouette is\nwithin normallimits.Cardiothoracic ratio measured at\n0.48, within normal limits. No acute osseous abnormality.\nIMPRESSION: No acute cardiopulmonary process."
+      },
+      {
+        "id": "radiology_report_photo",
+        "variant": "photo",
+        "cer": 0.08,
+        "wer": 0.6379,
+        "content_cer": 0.05,
+        "content_wer": 0.6379,
+        "field_accuracy": 0.0,
+        "latency_seconds": 1.1001,
+        "confidence": 0.9479,
+        "text": "RiversideMedical Group-Radiology Report\nCHESTX-RAY,PAANDLATERALVIEWS\nPatient:R.Thompson\nDate:2026-02-20\nCLINICAL HISTORY:Cough and shortness of breath.\nFINDINGS:The lungs are clearwithout focal consolidation,\neffusion,or pneumothorax.Cardiomediastinal silhouetteis\nwithin normal limits.Cardiothoracicratio measured at\n0.48,within normal limits.No acute osseous abnormality.\nIMPRESSION:No acute cardiopulmonary process."
+      },
+      {
+        "id": "medication_reconciliation_clean",
+        "variant": "clean",
+        "cer": 0.226,
+        "wer": 0.5965,
+        "content_cer": 0.2025,
+        "content_wer": 0.5965,
+        "field_accuracy": 0.3333,
+        "latency_seconds": 2.0399,
+        "confidence": 0.9708,
+        "text": "Medication Reconciliation-Discharge\nPatient: R.Thompson\nDischarge Date: 2026-03-05\nContinue home medications:\n-Atorvastatin 4omg nightly\n- Lisinopril 2omg daily\n-Metformin 1ooomg twice daily\nNew medications started this admission:\n-Apixaban5mg twice dailyfor new atrialfibrillation\nDiscontinued:\nFollowupwithcardiologyin2 weeks."
+      },
+      {
+        "id": "medication_reconciliation_photo",
+        "variant": "photo",
+        "cer": 0.0962,
+        "wer": 0.3333,
+        "content_cer": 0.0691,
+        "content_wer": 0.3333,
+        "field_accuracy": 0.0,
+        "latency_seconds": 1.4972,
+        "confidence": 0.9388,
+        "text": "Medication Reconciliation.Discharge\nPatient:R.Thorpson\nDischarge Date: 2026-03-05\nContinue hone medications:\nAtorvastatin 4omg nightly\nLisinopril 2omg daily\nMetformin 1ooomg twice daily\nNew medications started this admission:\nApixaban Sng twice daily for new atrial fibrillation\nDiscontinued:\nAspirin Bimg daily \uff08discontinued due to apixaban initiation)\nFoltow up with cardiology in 2 weeks."
+      }
+    ]
+  }
+]

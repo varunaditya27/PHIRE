@@ -1,10 +1,39 @@
 """
 Thin wrapper around the local Ollama API.
 
-Responsibilities (to implement):
-- Send prompts to the locally-running Ollama model and stream responses
-  back. Model is configurable (default: medgemma:8b-q4_0; alternatives:
-  qwen2:7b-instruct-q4_0, meditron:7b-q4_0).
-- No network calls beyond localhost/the local Ollama instance — the
-  privacy boundary is enforced here.
+Enforces PHIRE's local-only boundary at the code level, not just by
+convention: the host must resolve to localhost, so this client can never
+be pointed at a remote Ollama instance by a stray config value.
 """
+
+import os
+
+import requests
+
+from ml.local_only import require_localhost
+
+DEFAULT_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "medgemma:4b")
+
+
+class OllamaClient:
+    """Sends prompts to a local Ollama model and returns its completion."""
+
+    def __init__(self, model: str | None = None, host: str | None = None) -> None:
+        self.model = model or DEFAULT_MODEL
+        self.host = host or DEFAULT_HOST
+        require_localhost(self.host)
+
+    def generate(self, prompt: str, system: str | None = None, temperature: float = 0.2) -> str:
+        """Non-streaming completion via Ollama's /api/generate endpoint."""
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        if system:
+            payload["system"] = system
+        response = requests.post(f"{self.host}/api/generate", json=payload, timeout=120)
+        response.raise_for_status()
+        return response.json()["response"]

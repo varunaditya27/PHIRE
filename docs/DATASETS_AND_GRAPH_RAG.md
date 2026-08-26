@@ -98,8 +98,8 @@ A useful side effect for the nutrition/fitness recommendation layer specifically
 ### 3.4 What changes in the codebase
 
 - `ml/rag/retriever.py` — updated to describe the three-way hybrid (see file).
-- `ml/requirements.txt` — added `lightrag-hku` and `neo4j` as candidate (commented) dependencies, pending a Phase 2 spike.
-- No change to MVP (Weeks 1-3) scope: BM25 + Chroma remains the Tier 0 baseline. Graph RAG is a Month 2-3 addition, consistent with the existing roadmap's "Contradiction-Aware Health RAG" and "Hybrid Structured + Semantic Retrieval" phase-2 items in `docs/AGGRESSIVE_ROADMAP.md`.
+- `ml/requirements.txt` — `neo4j` is now a live dependency (not commented/candidate) — `ml/graph/` implements the deterministic half of this (Observation extraction from OCR'd tables), ahead of the original Month 2-3 timeline. `lightrag-hku` remains a candidate, not adopted — see below.
+- **Status update**: the deterministic table-extraction slice of Graph RAG was built and live-tested earlier than planned (patient documents needed OCR + structured extraction regardless of the broader graph-RAG timeline). This does **not** mean the full graph-RAG leg (LightRAG entity/relationship extraction from free text, multi-hop retrieval routing) is done — see `docs/GRAPH_SCHEMA_ROADMAP.md` for exactly what's built vs. deferred, and why the broader clinical-KG architecture patterns (ontology alignment, claim provenance as graph edges, additional node types) are deliberately not being adopted yet at PHIRE's current single-user, single-pipeline scale.
 
 ---
 
