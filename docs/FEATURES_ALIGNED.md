@@ -25,29 +25,29 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 ### Official NLP-06 Required Features
 
 **1. Local LLM Conversational Assistant** (NLP-06 §1)
-- Ollama + MedGemma 1.5 8B
+- Ollama + medgemma:4b (MedGemma ships only as 4B/27B, not "1.5"/"8B")
 - Conversational query interface
 - Real-time streaming responses
-- **MVP Status**: ✅ Week 1-2
+- **Status**: ✅ ML pipeline done (`ml/chains/qa_chain.py`); streaming + backend/frontend wiring not yet built
 
 **2. Personalized Wellness Guidance** (NLP-06 §1, Objectives)
 - Nutrition recommendations (LLM-powered)
 - Fitness recommendations (HAR-model powered)
 - Lifestyle guidance (evidence-backed)
-- **MVP Status**: ✅ Week 2-3
+- **Status**: ❌ Not started (`ml/recommendations/` is stubs only)
 
 **3. Health & Dietary Data Analysis** (NLP-06 §1, Objectives)
 - Lab value ingestion & normalization
 - Dietary data ingestion (manual entry)
 - Historical trend analysis
-- **MVP Status**: ✅ Week 1-2
+- **Status**: ✅ Done for lab values (`ml/graph/`); dietary manual-entry ingestion not built
 
 **4. Laboratory Report Explanation** (NLP-06 §1, Objectives)
-- PDF report parsing (Docling)
+- PDF report parsing (pypdf for text PDFs, olmOCR-v2 for scanned/photographed documents — not Docling)
 - Automatic value extraction
 - Report summarization
 - Plain-language explanations
-- **MVP Status**: ✅ Week 1
+- **Status**: ✅ Done (`ml/rag/ingest/`)
 
 **5. Privacy-Preserving Data Handling** (NLP-06 §1, Objectives)
 - All data stays local (no cloud APIs)
@@ -67,11 +67,11 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 **7. Claim-Level Evidence Attribution** (Research, from NLP-06 §4.A)
 - Atomic claim extraction from LLM output
 - Evidence retrieval & linking
-- MedRAGChecker integration
-- Interactive source highlighting (exact page/line numbers)
-- Evidence status labels (SUPPORTED, DERIVED, INFERRED, UNCERTAIN, CONFLICTING)
+- NLI-based verification (BART-large-MNLI, `ml/claims/verifier.py`) — not MedRAGChecker, which isn't installable (see `docs/OPEN_SOURCE_TOOLS.md`)
+- Source highlighting via exact character spans (`ml/rag/ingest/chunking.py`'s `locate_chunk_offsets`) — not page/line numbers; frontend rendering of this not yet built
+- Evidence status labels: SUPPORTED, DERIVED, CONFLICTING, UNCERTAIN, UNSUPPORTED (not INFERRED — no validated signal exists for multi-hop-reasoning claims yet, see `ml/claims/verifier.py`'s docstring)
 - **Research Impact**: ⭐⭐⭐⭐⭐
-- **MVP Status**: ✅ Week 2-3
+- **Status**: ✅ ML pipeline done and live-tested; frontend evidence display not yet built
 
 **8. Longitudinal Health Reasoning** (Research, from NLP-06 §4.B)
 - Temporal normalization of observations
@@ -80,7 +80,7 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - Multi-year context reasoning
 - Report-to-report comparison
 - **Research Impact**: ⭐⭐⭐⭐⭐
-- **MVP Status**: ✅ Week 1-2
+- **Status**: ✅ Graph-backed trend computation done (`ml/graph/patient_context.py`'s `get_trend_facts`, feeds `DERIVED` claim labeling); timeline visualization (frontend) not yet built
 
 **9. Hallucination Detection & Abstention** (Research, from NLP-06 §4.C)
 - Unsupported claim detection
@@ -88,7 +88,7 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - Automatic abstention on low-confidence claims
 - Safety gates for high-risk domains
 - **Research Impact**: ⭐⭐⭐⭐
-- **MVP Status**: ✅ Week 3
+- **Status**: ✅ Done and live-tested (`ml/chains/qa_chain.py`'s `ABSTENTION_THRESHOLD`)
 
 ---
 
@@ -213,17 +213,24 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - **MVP Status**: Month 4-6
 
 **18. Hybrid Structured + Semantic + Graph Retrieval** (NLP-06 §4.F, extended)
-- BM25 exact term matching (for lab values)
-- Dense retrieval (semantic similarity, Chroma)
-- **Graph traversal (finalized addition)** — LightRAG over a Neo4j-backed
-  Longitudinal Health Graph, for multi-hop and relational questions vector
-  similarity can't answer ("how did my LDL change relative to my statin
-  dose changes"), and for surfacing conflicting records via explicit
-  `conflicts_with`/`supersedes` edges rather than a similarity heuristic.
-  Full rationale: [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md) §3.
-- Reranking (authority, recency, relevance)
-- **MVP Status**: Month 2-3 (BM25 + Chroma is the Tier 0 baseline; graph
-  layer is the Month 2-3 addition)
+- BM25 exact term matching (for lab values) — ✅ done
+- Dense retrieval (semantic similarity, Chroma) — ✅ done
+- **Graph-backed patient facts** — ✅ done: `ml/graph/` (Neo4j, direct
+  Cypher, not LightRAG) stores structured Observation/Medication/Condition
+  facts and precomputes trend deltas, read into chat via
+  `ml/graph/patient_context.py`.
+- **Multi-hop graph-RAG traversal — ❌ not yet implemented, outstanding
+  work.** Questions requiring entity/relationship traversal at query time
+  ("how did my LDL change relative to my statin dose changes" as one hop,
+  or surfacing conflicts via explicit `conflicts_with`/`supersedes`
+  edges) aren't answerable yet — today's graph layer is single-patient
+  fact *lookup*, not traversal. See
+  [docs/GRAPH_SCHEMA_ROADMAP.md](GRAPH_SCHEMA_ROADMAP.md) §3f for the
+  detailed status and what's needed to build it. LightRAG itself was
+  evaluated as a candidate library for this and not adopted (see
+  [docs/DATASETS_AND_GRAPH_RAG.md](DATASETS_AND_GRAPH_RAG.md) §3) — that's
+  a decision about *how*, not *whether*, to build this leg.
+- Reranking (authority, recency, relevance) — ✅ done, benchmarked (`ml/rag/reranker_experiments/RESULTS.md`)
 
 **19. Evidence Quality Ranking** (NLP-06 §4.G)
 - Authority tiers (guidelines > RCTs > observational)
@@ -276,20 +283,18 @@ From NLP-06 §4 (Later Extensions):
 ## Open-Source Tools Integrated
 
 ### Core Infrastructure
-- **Ollama** (local LLM serving)
-- **MedGemma 1.5** (medical model)
-- **Chroma** (vector DB, native Python)
-- **Docling** (PDF extraction)
+- **Ollama** (local LLM serving) — medgemma:4b (chat), qwen3.5:9b (prose extraction), olmOCR-v2 (OCR)
+- **Chroma** (vector DB, in-process)
+- **pypdf + olmOCR-v2** (PDF/OCR extraction — not Docling)
 - **FastAPI** (backend)
 - **Next.js 15** (frontend)
 - **PostgreSQL** (data persistence)
 
 ### Evidence Attribution
-- **MedRAGChecker** (claim verification)
-- **LangChain** (RAG orchestration)
-- **Sentence-Transformers** (embeddings)
-- **LightRAG + Neo4j** (graph-based retrieval — finalized third leg of
-  hybrid retrieval, see Feature 18)
+- **BART-large-MNLI** (NLI-based claim verification — not MedRAGChecker, which isn't installable; see `docs/OPEN_SOURCE_TOOLS.md`)
+- Hand-written QA orchestration (`ml/chains/qa_chain.py`) — LangChain was evaluated and not adopted
+- **MedCPT** (dual-encoder embeddings + cross-encoder reranking)
+- **Neo4j** (graph store, direct Cypher — not LightRAG; multi-hop graph-RAG retrieval is not yet implemented, see Feature 18)
 
 ### Computer Vision
 - **MediaPipe Pose** (pose estimation — run directly, no training)
@@ -376,6 +381,6 @@ Computer vision features (10-15) extend NLP-06 scope with novel research angles 
 
 ---
 
-**Prepared**: August 2026
-**Status**: Ready for MVP implementation
-**Next Step**: Begin Week 1 development per CONTRIBUTING.md work division
+**Prepared**: August 2026, updated 2026-08-26
+**Status**: Tier 1 core ML pipeline (features 1, 3, 4, 7, 8, 9, part of 18) implemented and live-tested — see [ml/README.md](../ml/README.md) for details. Backend/frontend integration, recommendations (feature 2), Tier 2 CV extensions, and multi-hop graph retrieval are not yet built.
+**Next Step**: See `ml/README.md`'s Features & Status for `ml/`-specific next steps; CONTRIBUTING.md for cross-team work division

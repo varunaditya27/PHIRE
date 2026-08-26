@@ -1,9 +1,6 @@
 # PHIRE ML layer dependencies. Requires Python 3.11/3.12 (managed via uv,
 # see ml/.venv) — system Python 3.14 lacks wheels for torch/chromadb.
 
-# --- LLM orchestration ---
-langchain==1.3.15
-
 # --- Embeddings / retrieval ---
 # embeddings.py uses MedCPT directly via transformers/torch (dual encoder,
 # not a single Sentence-Transformers model); sentence-transformers is kept
@@ -27,9 +24,14 @@ rapidocr-onnxruntime==1.4.4  # cheap CPU-only OCR pre-pass, routes a PDF page to
 # --- Graph RAG (longitudinal + relational retrieval, see
 #     docs/DATASETS_AND_GRAPH_RAG.md) ---
 neo4j==6.2.0          # driver for the Neo4j-backed Longitudinal Health Graph (ml/graph/)
-# lightrag-hku       # Ollama-native LLM entity/relationship extraction — not
-                     # needed yet; ml/graph/observations.py extracts
-                     # deterministically from table_parsing.py instead
+# lightrag-hku       # Multi-hop graph-RAG retrieval leg -- NOT YET IMPLEMENTED,
+                     # outstanding work (see docs/GRAPH_SCHEMA_ROADMAP.md
+                     # section 3f). Single-patient fact lookup/trend
+                     # computation (ml/graph/patient_context.py) is done;
+                     # entity/relationship traversal at query time is not.
+                     # Uncomment once that work actually starts -- whether
+                     # LightRAG itself is the right library for it is a
+                     # separate decision from whether this leg gets built.
 
 # --- Claim verification: implemented via facebook/bart-large-mnli
 #     (transformers, already pinned above) — see

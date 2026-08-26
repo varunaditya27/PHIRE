@@ -35,41 +35,46 @@ throw documents at an LLM and ask it to invent a graph").
 
 ## 2. What's actually built and working right now
 
-Verified live, not aspirational (see `ml/graph/`, `ml/rag/ingest/table_parsing.py`):
+**Updated 2026-08-26** — everything in this section is shipped and
+live-tested (`ml/graph/`, `ml/rag/ingest/table_parsing.py`), not just
+"in progress" as an earlier pass of this doc said:
 
 ```
 (:Patient {id: "self"})
-      │
-      └─[:HAS_OBSERVATION]→ (:Observation {test_name, value, unit, reference_range, flag, date})
-                                    │
-                                    └─[:FROM_DOCUMENT]→ (:Document {id, filename})
+      ├─[:HAS_OBSERVATION]→ (:Observation {id, code, raw_value, value, unit, reference_range, interpretation, effective})
+      │                             │
+      │                             └─[:FROM_DOCUMENT]→ (:Document {id, filename})
+      ├─[:HAS_MEDICATION]→  (:Medication  {id, code, dosage, frequency, status, effective})
+      │                             └─[:FROM_DOCUMENT]→ (:Document)
+      └─[:HAS_CONDITION]→   (:Condition   {id, code, status, effective})
+                                    └─[:FROM_DOCUMENT]→ (:Document)
 ```
 
+FHIR-inspired field names (`code`/`value`/`effective`/`interpretation`)
+are in place, not "in progress" — this is the schema `ml/graph/observations.py`,
+`medications.py`, and `conditions.py` actually write.
+
 - Deterministic extraction from OCR'd HTML tables (`table_parsing.py`) —
-  the table's own headers *are* the schema, no LLM guessing involved.
-  Live-tested: 8/8 observations correctly extracted and typed from a real
-  scanned lab panel.
+  the table's own headers *are* the schema, no LLM guessing involved —
+  for Observations only (labs/vitals). Live-tested: 8/8 observations
+  correctly extracted and typed from a real scanned lab panel.
+- **Typed `Medication`/`Condition` nodes**: done. Extracted from free
+  text via schema-constrained LLM extraction (`ml/graph/prose_extraction.py`,
+  qwen3.5:9b) — the hand-rolled-vs-LangExtract benchmark mentioned in an
+  earlier pass of this doc is resolved: hand-rolled won (matched a 27B
+  alternative exactly while running ~13x faster; see
+  `ml/graph/experiments/RESULTS.md`).
+- **Read path**: `ml/graph/patient_context.py` turns the graph's current
+  state into plain-text facts fed to chat generation
+  (`get_patient_facts`), a deduplicated "latest value per metric" view
+  for claim verification (`get_current_patient_facts`), and precomputed
+  trend deltas (`get_trend_facts`) that `ml/chains/qa_chain.py` uses to
+  label a matching claim `DERIVED` rather than asking NLI to do the
+  arithmetic itself. All wired into the live chat pipeline, not standalone.
 - Single well-known `Patient` node (`"self"`) — matches PHIRE's actual
   single-user-per-local-instance model, not a multi-tenant assumption.
 - Idempotent writes (`MERGE` on a stable id) — re-ingesting a document
-  updates its Observations rather than duplicating them.
-
-**Already decided, in progress**: typed `Medication`/`Condition` nodes
-alongside `Observation` (not folded into one generic type — their fields
-genuinely differ, dose/frequency/route vs. value/unit/reference_range).
-FHIR-inspired field renaming (`code`/`value`/`effective`/`interpretation`
-instead of ad hoc names) — cheap now, while the schema has no real data
-depending on today's names.
-
-**In progress right now**: a benchmark comparing two methods for
-extracting *free-text* facts (medications mentioned in prose, not
-tables) — hand-rolled schema-constrained Ollama extraction (the same
-proven pattern as OCR) vs. Google LangExtract (real, verified library,
-source-grounds every extraction to its exact character span in the
-source text — genuinely valuable for citation, but its Ollama path only
-gets loose JSON mode, not full schema constraints, which the hand-rolled
-approach already has). Results pending; will determine what feeds the
-Medication/Condition nodes for prose-derived facts.
+  updates its Observations/Medications/Conditions rather than duplicating them.
 
 ---
 
@@ -187,14 +192,41 @@ build it when there's a real symptom-tracking feature to attach it to.
 the current schema can't satisfy. Add node types one at a time, driven by
 that need, not as a batch.
 
+### 3f. Multi-hop graph-RAG retrieval (LightRAG-style) — **not yet implemented, outstanding work, not deferred**
+
+**What it is**: `ml/rag/retriever.py`'s own module docstring describes
+retrieval as three-way — lexical (BM25), semantic (Chroma), and graph
+traversal — but only the first two legs exist. Everything built in
+`ml/graph/` today is single-patient fact *lookup* (current value per
+metric, latest-vs-previous trend delta), read directly by
+`ml/graph/patient_context.py` — there is no traversal of relationships
+*between* entities at query time (e.g. "connect my rising LDL trend to
+the specific guideline passage that explains the risk" as one hop, not
+two separate lookups glued together in the prompt).
+
+**Distinction from other deferred items in this doc**: sections 3b/3c/3e
+above are deferred because the problem they solve doesn't exist yet at
+PHIRE's current single-patient, single-pipeline scale. Multi-hop
+retrieval is different — `README.md` and `docs/DATASETS_AND_GRAPH_RAG.md`
+already describe PHIRE's RAG architecture as including this leg, so it's
+not speculative future scope, it's a committed piece of the described
+architecture that hasn't been built yet. LightRAG itself (the specific
+library) was evaluated and not adopted as a dependency — see
+`docs/DATASETS_AND_GRAPH_RAG.md` and `docs/OPEN_SOURCE_TOOLS.md` — but
+that's a decision about *how* to build this leg, not *whether* to.
+
+**Status**: not started. No LightRAG-style entity/relationship graph, no
+multi-hop query planning, no code in `ml/` attempts this today.
+
 ---
 
 ## 4. Summary table
 
 | Idea | Verdict | Why |
 |---|---|---|
-| FHIR-ish field naming | **Do now** (in progress) | Free right now, expensive later |
-| Typed Medication/Condition nodes | **Do now** (in progress) | Already decided; fields genuinely differ from Observation |
+| FHIR-ish field naming | **Done** | Shipped — see §2 |
+| Typed Medication/Condition nodes | **Done** | Shipped, live-tested — see §2 |
+| Multi-hop graph-RAG retrieval (LightRAG-style) | **Not implemented — outstanding, must be built** | Third retrieval leg described in the architecture docs but never built; see §3f |
 | Effective vs. recorded date, formalized | **Separate pass, later** (decided 2026-08-16) | Not bundled into current work; revisit with more real ingested data |
 | Claim→evidence as graph edges | **Next trigger in line** (updated 2026-08-16) | Persisted chat history confirmed coming soon — design both together |
 | RxNorm medication normalization | **Defer** | No cross-document naming drift observed yet; cheap when needed |

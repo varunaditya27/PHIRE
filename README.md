@@ -8,7 +8,7 @@ PHIRE helps users understand their personal health data through an AI assistant 
 - Reasons over years of health history (detects trends, patterns, contradictions)
 - Detects when it's uncertain and abstains (prevents false health information)
 
-**Status**: MVP in development (3-week sprint) + 9-month research roadmap
+**Status**: Core ML pipeline (RAG, claim verification, Longitudinal Health Graph) implemented and live-tested; backend/frontend integration and extended features in progress. See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the current checklist.
 
 ---
 
@@ -38,16 +38,19 @@ Frontend (Next.js)
 FastAPI Backend (Python)
     ↓ ↙ ↘
 Ollama     RAG System            ML Models
-(Local     (Chroma vector +      (Recommendations)
- LLM)       BM25 + LightRAG/Neo4j graph)
+(Local     (Chroma vector +      (Recommendations —
+ LLM)       BM25 + Neo4j graph)   not yet built)
     ↓ ↓ ↓ ↓
 PostgreSQL (Patient Data, Timeline, Claims, Evidence)
 ```
 
 RAG is hybrid, not vector-only: lexical (BM25) and semantic (Chroma) search
-handle single-hop lookups; a graph layer (LightRAG over Neo4j) handles
-multi-hop, longitudinal, and contradiction-surfacing questions. See
-[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md) for why.
+handle single-hop lookups; a graph layer (Neo4j, queried directly via
+Cypher — LightRAG was evaluated and not adopted, see
+[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md)) handles
+longitudinal patient facts and trend computation today, with multi-hop
+graph-RAG retrieval as future work (see
+[docs/GRAPH_SCHEMA_ROADMAP.md](docs/GRAPH_SCHEMA_ROADMAP.md)).
 
 **Key design principle**: All data stays local. No cloud APIs, no external LLM calls.
 
@@ -65,7 +68,7 @@ multi-hop, longitudinal, and contradiction-surfacing questions. See
 
 ```bash
 # Clone repository
-git clone https://github.com/varunaditya/PHIRE.git
+git clone https://github.com/varunaditya27/PHIRE.git
 cd PHIRE
 
 # Setup environment
@@ -90,20 +93,24 @@ curl http://localhost:8000/health
 
 ## 📊 Features & Status
 
-| Feature | Status | Timeline |
-|---------|--------|----------|
-| Local LLM inference | ✅ MVP | Week 1 |
-| Evidence attribution | ✅ MVP | Week 2-3 |
-| Longitudinal reasoning | ✅ MVP | Week 1-2 |
-| Hallucination detection | ✅ MVP | Week 3 |
-| Document ingestion | ✅ MVP | Week 1 |
-| Fitness recommendations | 🔄 Extended | Month 4-6 |
-| Nutrition recommendations | 🔄 Extended | Month 4-6 |
-| Wearable integration | 🔄 Extended | Month 7-9 |
-| Contradiction detection | 🔄 Extended | Month 4-6 |
-| FHIR representation | 🔄 Extended | Month 6-8 |
+**Core**
+- [x] Local LLM inference (Ollama, medgemma:4b)
+- [x] Hybrid retrieval (BM25 + Chroma semantic search, MedCPT-reranked)
+- [x] Evidence attribution (claim-level, with exact source spans)
+- [x] Claim verification / hallucination detection (NLI-based, abstains below confidence threshold)
+- [x] Longitudinal reasoning (Neo4j-backed patient fact graph: current state + trend deltas)
+- [x] Document ingestion (text PDFs + scanned/photographed documents via OCR)
+- [ ] Backend API integration (`backend/` wiring to `ml/`)
+- [ ] Frontend chat UI
 
-See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for complete feature roadmap.
+**Extended (post-core)**
+- [ ] Fitness recommendations
+- [ ] Nutrition recommendations
+- [ ] Wearable integration
+- [ ] Multi-hop graph-RAG retrieval (LightRAG-style, beyond today's single-patient fact lookups)
+- [ ] FHIR-compliant representation
+
+See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete feature checklist.
 
 ---
 
@@ -111,11 +118,13 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for complete feature ro
 
 - **Frontend**: Next.js 14, React, TypeScript
 - **Backend**: FastAPI, Python 3.10+
-- **LLM**: Ollama + MedGemma 1.5 8B (or Meditron-7B)
-- **Vector DB**: Chroma (or Qdrant)
-- **Graph DB**: Neo4j (Community Edition) via LightRAG, for longitudinal/relational retrieval
+- **LLM**: Ollama + medgemma:4b (chat), qwen3.5:9b (prose fact extraction), olmOCR-v2 (scanned/photographed document OCR) — all benchmarked, see `ml/*/experiments/RESULTS.md`
+- **Embeddings / Reranking**: MedCPT (dual encoder + cross-encoder)
+- **Claim verification**: BART-large-MNLI (NLI-based entailment/contradiction scoring)
+- **Vector DB**: Chroma (in-process)
+- **Graph DB**: Neo4j (Community Edition), queried directly via Cypher — for the Longitudinal Health Graph (structured patient facts, trend computation)
 - **Database**: PostgreSQL
-- **ML Models**: TensorFlow/PyTorch (optional, for recommendations)
+- **ML Models**: PyTorch (transformers) for RAG/claims; recommendation models not yet built
 - **Deployment**: Docker, Docker Compose
 
 ---
@@ -124,8 +133,9 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for complete feature ro
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Roles, work division, detailed task breakdown
 - **[GET_STARTED.md](GET_STARTED.md)** - First-day setup & onboarding checklist
+- **[ml/README.md](ml/README.md)** - `ml/` subsystem: architecture, quick start, model choices, feature status
 - **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap (MVP + extended, aligned to NLP-06)
-- **[docs/AGGRESSIVE_ROADMAP.md](docs/AGGRESSIVE_ROADMAP.md)** - 3-week MVP + 9-month timeline
+- **[docs/AGGRESSIVE_ROADMAP.md](docs/AGGRESSIVE_ROADMAP.md)** - Build checklist: core MVP + extended features
 - **[docs/OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md)** - 40+ open-source tools & integration guide
 - **[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md)** - Finalized fitness/nutrition datasets, model choices, and the hybrid vector + graph RAG architecture
 - **[REPO_STRUCTURE.md](REPO_STRUCTURE.md)** - Repository layout & folder ownership
@@ -182,7 +192,7 @@ Always consult qualified healthcare professionals for medical decisions. PHIRE i
 ## 📋 Research Basis
 
 Every feature in PHIRE is backed by peer-reviewed research (2023-2026):
-- **Evidence attribution**: MedRAGChecker (2025)
+- **Evidence attribution / claim verification**: NLI-based entailment/contradiction scoring (BART-large-MNLI, selected via a 129-pair benchmark against 5 other candidates including medical-specialized models — see `ml/claims/experiments/RESULTS.md`); MedRAGChecker was evaluated during tool selection but isn't installable/integrated, see `docs/OPEN_SOURCE_TOOLS.md`
 - **Temporal reasoning**: Longitudinal health reasoning (multiple 2025 papers)
 - **Hallucination detection**: MedHallBench (2025)
 - **Local model deployment**: Privacy-preserving LLM studies (2024-2026)
@@ -198,7 +208,7 @@ Every feature in PHIRE is backed by peer-reviewed research (2023-2026):
   title={PHIRE: Privacy-Preserving Local Healthcare AI with Evidence Attribution},
   author={Aditya, Varun and Bhat, Anika U and Rao, M. Shashwati},
   year={2026},
-  url={https://github.com/varunaditya/phire}
+  url={https://github.com/varunaditya27/PHIRE}
 }
 ```
 
@@ -214,4 +224,4 @@ Every feature in PHIRE is backed by peer-reviewed research (2023-2026):
 
 **Built with 🔬 research rigor, 🏥 healthcare focus, 🔒 privacy-first design**
 
-Last updated: August 2026
+Last updated: 2026-08-26

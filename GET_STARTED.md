@@ -20,12 +20,11 @@
 - **Shashwati**: Frontend & Evaluation section (Next.js UI, metrics, benchmarks, research)
 
 ### 3. **docs/AGGRESSIVE_ROADMAP.md** (15 min)
-- 3-week MVP breakdown (days 1-21)
-- 9-month extended roadmap
-- Effort estimates
+- Core build checklist
+- Extended roadmap phases
 - Success metrics
 
-### 4. **docs/FEATURES.md** (5 min, reference)
+### 4. **docs/FEATURES_ALIGNED.md** (5 min, reference)
 - Complete feature list (Tier 1-4)
 - What's in MVP vs. extended
 
@@ -44,16 +43,22 @@
 
 ### This Afternoon (1 hour)
 ```bash
-# Varun (ML):
-$ pip install langchain sentence-transformers torch
-$ pip install chroma-db  # For local testing
-# Download embedding model: python -c "from sentence_transformers import SentenceTransformer; m = SentenceTransformer('allenai-specter')"
+# Varun (ML) — see ml/requirements.txt for the full pinned list, uv-managed:
+$ pip install transformers sentence-transformers torch chromadb rank_bm25 neo4j
+# Embedding/reranking models (MedCPT) and the NLI verifier (BART-large-MNLI)
+# download automatically on first use via ml/rag/embeddings.py, ml/rag/reranker.py,
+# ml/claims/verifier.py — no separate manual download step.
 
 # Anika (Backend):
 $ curl -fsSL https://ollama.ai/install.sh | sh
-$ ollama pull medgemma:8b-q4_0  # ~4GB download
+$ ollama pull medgemma:4b   # chat generation, ~2.5GB
+$ ollama pull qwen3.5:9b    # prose fact extraction (ml/graph/prose_extraction.py)
 $ pip install fastapi uvicorn sqlalchemy psycopg2
 $ docker --version && docker-compose --version
+# Neo4j (Longitudinal Health Graph — required for ml/graph/, see ml/.env.example):
+$ podman run -d --name phire-neo4j -p 7474:7474 -p 7687:7687 \
+    -e NEO4J_AUTH=neo4j/<password> -v phire-neo4j-data:/data \
+    docker.io/library/neo4j:5-community
 
 # Shashwati (Frontend):
 $ node --version && npm --version
@@ -64,7 +69,7 @@ $ pip install pandas numpy scikit-learn scipy matplotlib seaborn
 ### Late Afternoon (1 hour)
 ```bash
 # All three:
-$ git clone https://github.com/varunaditya/PHIRE.git
+$ git clone https://github.com/varunaditya27/PHIRE.git
 $ cd PHIRE
 
 # Create feature branch for Week 1 work
@@ -74,8 +79,8 @@ $ git checkout -b feat/week1-evaluation
 ```
 
 ### 5 PM: Team Meeting (30 min)
-- **Confirm**: Tech stack decisions (Ollama ✅, Chroma ✅, MedGemma ✅)
-- **Confirm**: Model choice (Qwen2-7B or Meditron-7B?)
+- **Confirm**: Tech stack decisions (Ollama ✅, Chroma ✅, medgemma:4b ✅, Neo4j ✅)
+- **Confirm**: Model choices — see `ml/*/experiments/RESULTS.md` for the benchmarks behind each (medgemma:4b for chat, qwen3.5:9b for prose extraction, MedCPT for embeddings/reranking, BART-large-MNLI for claim verification, olmOCR-v2 for OCR)
 - **Setup**: Daily standup time (9 AM)
 - **Setup**: Weekly sync time (Friday 3 PM)
 - **Divide**: Issue assignments (Week 1 tasks from CONTRIBUTING.md)
@@ -84,22 +89,22 @@ $ git checkout -b feat/week1-evaluation
 
 ## 📅 WEEK 1 TASKS (From CONTRIBUTING.md)
 
-### Varun's Week 1 (40 hrs) - ML & Intelligence
-- [ ] Download embedding model (medical-specialized)
-- [ ] Setup Chroma vector DB (native Python)
-- [ ] Ingest 50+ clinical reference documents
-- [ ] Design LLM prompt for claim extraction (v1)
-- [ ] Design MedRAGChecker integration
-- [ ] Mock RAG chain (works without Anika's API yet)
+### Varun's Week 1 - ML & Intelligence — all done, see CONTRIBUTING.md
+- [x] Download embedding model (medical-specialized) — MedCPT
+- [x] Setup Chroma vector DB (native Python)
+- [x] Ingest 50+ clinical reference documents
+- [x] Design LLM prompt for claim extraction (v1)
+- [x] Design claim verification approach — NLI-based (BART-large-MNLI), not MedRAGChecker (not installable)
+- [x] Real RAG chain implemented (`ml/chains/qa_chain.py`)
 
-### Anika's Week 1 (40 hrs) - Backend Infrastructure
-- [ ] Ollama + MedGemma 1.5 running locally
-- [ ] PostgreSQL + pgvector Docker setup
+### Anika's Week 1 - Backend Infrastructure
+- [ ] Ollama + medgemma:4b running locally
+- [ ] PostgreSQL Docker setup (Chroma is the vector store, not pgvector)
 - [ ] FastAPI project scaffold + basic endpoints
 - [ ] Database schema + migrations
 - [ ] docker-compose file for all services
 
-### Shashwati's Week 1 (50 hrs) - Frontend & Evaluation
+### Shashwati's Week 1 - Frontend & Evaluation
 - [ ] Next.js 15 project setup (app router, TypeScript)
 - [ ] Chat component scaffold (input + response display)
 - [ ] Tailwind CSS + responsive layout
@@ -113,15 +118,15 @@ $ git checkout -b feat/week1-evaluation
 
 ## 🎯 Key Decisions Already Made
 
-✅ **LLM**: Ollama + MedGemma 1.5 (91% USMLE, open-weight, auditable)
-✅ **Vector DB**: Chroma native Python (simplicity for MVP, scale to Qdrant later)
-✅ **RAG Verification**: MedRAGChecker (2026 standard for medical grounding)
-✅ **ML**: Pre-trained HAR (fitness) in MVP, nutrition model in month 6+
+✅ **LLM**: Ollama + medgemma:4b (chat), qwen3.5:9b (prose fact extraction) — MedGemma ships only as 4B/27B, not "1.5"/"8B"
+✅ **Vector DB**: Chroma native Python (in-process)
+✅ **Graph DB**: Neo4j, queried directly via Cypher — for the Longitudinal Health Graph (structured patient facts, trend computation); LightRAG was evaluated and is **not yet implemented** — multi-hop graph-RAG retrieval is still outstanding work, see `docs/GRAPH_SCHEMA_ROADMAP.md`
+✅ **Claim Verification**: NLI-based entailment/contradiction scoring (BART-large-MNLI) — not MedRAGChecker, which isn't installable (see `docs/OPEN_SOURCE_TOOLS.md`)
+✅ **ML**: Pre-trained HAR (fitness) planned but not yet started; nutrition model not yet started
 ✅ **Frontend**: Next.js 15 (server components keep PHI server-side)
 ✅ **Backend**: FastAPI (type-safe, async, production-ready)
-✅ **Database**: PostgreSQL + pgvector (encryption, audit logs, RLS)
+✅ **Database**: PostgreSQL (relational only — patients, timeline, claims, evidence), Chroma is the vector store
 ✅ **Evaluation**: ArchEHR-QA 2026 (167 expert cases, modular assessment)
-✅ **Acceleration**: AI coding agents for 1.5x realistic speedup (not hype 2-3x)
 
 ---
 
@@ -133,34 +138,35 @@ $ git checkout -b feat/week1-evaluation
 - Understands your health trends (not just today's data)
 - Refuses to guess when uncertain
 - Gives fitness recommendations
-- ~285 hours total (190 with AI agents)
 
 ### Extended (9 months)
 - Nutrition recommendations (ML model trained on real data)
 - Wearable integration (Fitbit, Oura, Apple Watch)
-- Multi-region healthcare network deployment
-- FDA 510(k) regulatory pathway
+- Multi-hop graph-RAG retrieval (see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f)
 - 2 peer-reviewed papers published
-- ~1160 hours total
+
+PHIRE is a single-user, local-only personal health tool — one instance
+per person, not a multi-tenant clinical system. "Multi-region healthcare
+network deployment" and an "FDA 510(k) regulatory pathway" were removed
+from this list (2026-08-26): both describe a different product category
+(a multi-patient clinical device requiring regulatory clearance), not
+this project's scope.
 
 ---
 
 ## ⚡ AI Agent Strategy
 
-**Use agents for** (high speedup):
+**Use agents for**:
 - Boilerplate code generation
 - Test case generation
 - Documentation
 - Docker/CI-CD automation
 
-**Don't use agents for** (still human domain):
+**Don't use agents for** (human domain):
 - Architecture decisions
 - Research methodology
 - Safety/security design
-- Regulatory strategy
 - Paper core ideas
-
-**Realistic speedup**: 1.5x (don't believe marketing hype of 2-3x)
 
 ---
 
@@ -205,22 +211,26 @@ Before starting Week 1:
 
 ## 🎓 Expected Outcomes
 
-### After Week 3 (MVP)
-- ✅ Working healthcare AI demo (3 clinician personas)
-- ✅ Evidence attribution system (claims → sources)
-- ✅ Hallucination detection working
-- ✅ Fitness recommendations active
-- ✅ Evaluation metrics quantified
-- ✅ GitHub repo ready for public
-- ✅ Deployment automated (docker-compose up -d)
+### Core MVP
+- Working personal health AI demo (3 realistic individual-user personas — not clinician personas; PHIRE is single-user, not clinician-facing)
+- Evidence attribution system (claims → sources)
+- Hallucination detection working
+- Fitness recommendations active
+- Evaluation metrics quantified
+- GitHub repo ready for public
+- Deployment automated (docker-compose up -d)
 
-### After 9 Months (Extended)
-- ✅ Nutrition ML model trained
-- ✅ Wearable integration working
-- ✅ 2 research papers published (ACL/EMNLP)
-- ✅ Open-source release with benchmark
-- ✅ Healthcare network pilot deployment
-- ✅ FDA 510(k) pathway mapped
+### Extended
+- Nutrition ML model trained
+- Wearable integration working
+- 2 research papers published (ACL/EMNLP)
+- Open-source release with benchmark
+- Multi-hop graph-RAG retrieval built (see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f)
+
+"Healthcare network pilot deployment" and "FDA 510(k) pathway mapped"
+removed (2026-08-26) — PHIRE is a single-user, local-only personal health
+tool, not a multi-tenant clinical system; that's a different product
+category, not this project's extended scope.
 
 ---
 
@@ -228,14 +238,12 @@ Before starting Week 1:
 
 | Question | Answer |
 |----------|--------|
-| What's the tech stack? | Next.js, FastAPI, Ollama, Chroma, PostgreSQL, Docker |
-| Which LLM? | MedGemma 1.5 (or Meditron-7B, either works) |
-| How much time/week? | 15-16 hours (MVP), 18-22 hours (extended) |
-| When does MVP ship? | End of Week 3 (21 days) |
+| What's the tech stack? | Next.js, FastAPI, Ollama, Chroma, Neo4j, PostgreSQL, Docker |
+| Which LLM? | medgemma:4b (chat), qwen3.5:9b (prose fact extraction) — see `ml/*/experiments/RESULTS.md` for why |
 | How do I know what to do? | CONTRIBUTING.md has your detailed role + tasks |
 | What if I'm blocked? | Daily standup at 9 AM to unblock immediately |
-| Can I use AI coding agents? | Yes, for boilerplate (3-5x speedup), test generation, docs |
-| Do I need to know all the research? | No, just your subsystem. docs/RESEARCH.md is reference-only |
+| Can I use AI coding agents? | Yes, for boilerplate, test generation, docs |
+| Do I need to know all the research? | No, just your subsystem. `docs/RESEARCH_LOG.md` (ml/) has dated findings/decisions if you want the "why" |
 
 ---
 
@@ -260,7 +268,7 @@ The competitive window is 6-12 months. Move fast.
 **Questions?**
 - Setup issues → See README.md
 - Role clarity → See CONTRIBUTING.md
-- Feature details → See docs/FEATURES.md or docs/AGGRESSIVE_ROADMAP.md
+- Feature details → See docs/FEATURES_ALIGNED.md or docs/AGGRESSIVE_ROADMAP.md
 - Daily decisions → Daily standup, weekly sync
 
 **Status**: 🟢 READY TO START

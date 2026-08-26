@@ -1,317 +1,205 @@
-# PHIRE: Aggressive Implementation Roadmap
-## 3-Week MVP + 9-Month Extended (2023-2026 Tech Stack)
+# PHIRE: Implementation Roadmap
+## Core Build Checklist + Extended Phases
 
 **Team**: Varun (ML & Intelligence), Anika (Backend Infrastructure), Shashwati (Frontend & Evaluation)
-**Acceleration**: AI coding agents (1.5x realistic speedup, not hype)
 **Research Basis**: 2023-2026 healthcare AI evolution analysis
 
----
-
-## 🚀 3-WEEK MVP: AGGRESSIVE SCOPE
-
-### Week 1: Foundation + First Features
-
-**Days 1-2: Infrastructure Bootstrap**
-- Ollama + MedGemma 1.5 (8B, 4.1GB quantized) → localhost:11434
-- PostgreSQL (Docker) + pgvector extension
-- Chroma vector DB (native Python, not Docker)
-- FastAPI scaffold with async routing
-- Next.js 15 setup with server components (keeps PHI server-side)
-- **AI Agent**: Scaffold all boilerplate (3-5x speedup)
-- **Deliverable**: All services running, basic API endpoints
-
-**Days 3-4: Document Pipeline + RAG Core**
-- PDF extraction (Docling) → normalized observations
-- Chroma ingestion pipeline (embed clinical reference docs)
-- BM25 lexical retrieval (exact term matching for lab values)
-- LangChain RAG chain with Ollama
-- Basic retrieval endpoint: `/api/evidence/retrieve`
-- **AI Agent**: RAG integration boilerplate
-- **Deliverable**: Query "LDL" → returns relevant evidence
-
-**Days 5-7: Claim Extraction + Early Verification**
-- LLM prompt for structured claim extraction (atomic facts)
-- MedRAGChecker integration (evidence verification)
-- Confidence scoring (SUPPORTED, DERIVED, INFERRED, UNCERTAIN)
-- Entailment checking (does evidence support claim?)
-- Early UI: Chat interface + clickable evidence highlights
-- **AI Agent**: Prompt optimization, UI components
-- **Deliverable**: `/api/chat` returns claims with evidence links
-
-### Week 2: Medical Intelligence + Health Context
-
-**Days 8-10: Longitudinal Reasoning**
-- Health timeline construction (observations grouped by date)
-- Temporal normalization (unit conversion, date alignment)
-- Trend detection (simple: compare recent vs. 1-year-ago)
-- LLM reasoning over timeline context
-- Enhanced prompt: patient context + evidence + temporal patterns
-- **AI Agent**: Timeline algorithms, context building
-- **Deliverable**: System understands "your LDL has increased 18 points"
-
-**Days 11-13: Fitness Recommendations + Hallucination Detection**
-- Pre-trained HAR model (PAMAP2-based, activity recognition)
-- Fitness recommendation engine (activity patterns → suggestions)
-- Unsupported claim detection (flag claims without evidence)
-- Abstention logic (refuse to answer if uncertain)
-- Safety gates for high-risk claims (medications, diagnoses)
-- **AI Agent**: Model integration, safety gate implementation
-- **Deliverable**: System gives fitness advice + halts on unsupported health claims
-
-**Days 14-15: Integration + Polish**
-- Connect all subsystems (frontend ↔ backend ↔ RAG ↔ LLM ↔ HAR)
-- Error handling, logging, HIPAA audit trails
-- Caching layer (reduce LLM inference latency)
-- Basic privacy audit (verify no cloud data egress)
-- **AI Agent**: Integration scaffolding, tests
-- **Deliverable**: Complete end-to-end system working
-
-### Week 3: Evaluation + Documentation
-
-**Days 16-18: Rigorous Testing**
-- ArchEHR-QA 2026 evaluation (167 expert cases)
-- Compute baseline metrics:
-  - Evidence attribution accuracy (precision/recall)
-  - Claim extraction quality
-  - Hallucination rate
-  - Response latency (<3 sec target)
-- Comparison: MedRAGChecker vs. baseline RAG
-- **AI Agent**: Test case generation, metrics computation
-- **Deliverable**: Quantified MVP performance
-
-**Days 19-21: Demo + Production Readiness**
-- Create 3 realistic clinician personas + demo scenarios
-- End-to-end workflow testing (no errors)
-- Production-grade error handling
-- README + deployment guide
-- GitHub Actions CI/CD setup (test on push)
-- **AI Agent**: Docs generation, test automation
-- **Deliverable**: Demo-ready system, GitHub-ready code
+**Note (2026-08-26)**: this doc originally used a 3-week/9-month calendar
+framing with hour-based effort estimates. Both removed — the checklists
+below reflect actual build status, not a schedule or a time budget.
 
 ---
 
-## 📊 MVP Feature Matrix
+## 🚀 Core Build Checklist
 
-| Feature | Effort | Status | Research Value |
-|---------|--------|--------|-----------------|
-| Local LLM inference | 20 hrs | ✅ | Baseline |
-| Evidence attribution | 60 hrs | ✅ | ⭐⭐⭐⭐⭐ |
-| Longitudinal reasoning | 50 hrs | ✅ | ⭐⭐⭐⭐⭐ |
-| Hallucination detection | 40 hrs | ✅ | ⭐⭐⭐⭐ |
-| Document ingestion | 35 hrs | ✅ | ⭐⭐ |
-| Fitness recommendations | 30 hrs | ✅ | ⭐⭐⭐⭐ |
-| Health timeline | 25 hrs | ✅ | ⭐⭐⭐⭐ |
-| ArchEHR-QA evaluation | 25 hrs | ✅ | ⭐⭐⭐⭐ |
+### Infrastructure Bootstrap
+- [x] Ollama + medgemma:4b (chat), qwen3.5:9b (prose extraction) → localhost:11434
+- [ ] PostgreSQL (Docker) — Chroma is the vector store, not pgvector
+- [x] Chroma vector DB (native Python, in-process)
+- [x] Neo4j (Docker/podman) — Longitudinal Health Graph
+- [ ] FastAPI scaffold with async routing
+- [ ] Next.js 15 setup with server components (keeps PHI server-side)
+- **Deliverable**: All services running, basic API endpoints — ml/-side services (Ollama, Chroma, Neo4j) ready; backend/frontend scaffolding not yet built
 
-**Total MVP**: 285 hours (without agents) → ~190 hours (with 1.5x acceleration)
-**Per person**: ~63 hours (3 weeks × 15-16 hrs/week realistic)
+### Document Pipeline + RAG Core
+- [x] PDF/OCR extraction (pypdf + olmOCR-v2, not Docling) → normalized observations
+- [x] Chroma ingestion pipeline (embed clinical reference docs — PubMed, MedlinePlus, USDA)
+- [x] BM25 lexical retrieval (exact term matching for lab values)
+- [x] Hand-written RAG chain with Ollama (`ml/chains/qa_chain.py`) — LangChain evaluated, not adopted
+- [ ] Backend retrieval endpoint: `/api/evidence/retrieve`
+- **Deliverable**: Query "LDL" → returns relevant evidence — ✅ done at the `ml/` level (`HybridRetriever.retrieve`), not yet exposed via a backend endpoint
 
----
+### Claim Extraction + Verification
+- [x] LLM prompt for structured claim extraction (atomic facts)
+- [x] NLI-based claim verification (BART-large-MNLI, `ml/claims/verifier.py`) — not MedRAGChecker, which isn't installable
+- [x] Confidence scoring (status taxonomy: SUPPORTED, DERIVED, CONFLICTING, UNCERTAIN, UNSUPPORTED — not INFERRED, no validated signal for it yet)
+- [x] Entailment checking (does evidence support claim?)
+- [ ] UI: Chat interface + clickable evidence highlights
+- **Deliverable**: `/api/chat` returns claims with evidence links — ✅ done as a direct `QAChain.answer()` call; not yet exposed via a backend endpoint or rendered in a UI
 
-## 🎯 Months 2-9: Extended Roadmap (Aggressive)
+### Longitudinal Reasoning
+- [x] Health timeline construction (Observations grouped by date, Neo4j)
+- [x] Temporal normalization (day-first date parsing, DOB exclusion — `ml/graph/document_dates.py`)
+- [x] Trend detection (latest vs. previous reading, `ml/graph/patient_context.py`'s `get_trend_facts`)
+- [x] LLM reasoning over timeline context
+- [x] Enhanced prompt: patient context + evidence + trend facts
+- **Deliverable**: System understands "your LDL has increased 18 points" — ✅ done and live-tested (labeled `DERIVED`, not asserted by the LLM itself)
 
-### Phase 2: Advanced Evidence & ML (Months 2-3)
+### Fitness Recommendations + Hallucination Detection
+- [ ] Pre-trained HAR model (PAMAP2-based, activity recognition) — not started
+- [ ] Fitness recommendation engine — not started (`ml/recommendations/` is stubs only)
+- [x] Unsupported claim detection (flag claims without evidence)
+- [x] Abstention logic (refuse to answer if uncertain)
+- [ ] Safety gates for high-risk claims (medications, diagnoses) — beyond the general abstention threshold, no dedicated high-risk gate yet
+- **Deliverable**: System gives fitness advice + halts on unsupported health claims — hallucination detection ✅ done and live-tested; fitness advice ❌ not started
 
-**Month 2 Focus**: Enhance medical grounding + start ML
-- Contradiction detection (conflicting lab values across visits)
-- Evidence ranking (guidelines > RCTs > obs. data)
-- Multi-modal document understanding (images + tables + text)
-- Start nutrition recommendation data collection
-- Privacy-utility benchmark (local 8B vs cloud models)
-- **Effort**: 200 hours
-- **Deliverable**: Production-grade medical reasoning
+### Integration + Polish
+- [ ] Connect all subsystems (frontend ↔ backend ↔ RAG ↔ LLM ↔ HAR) — `ml/` pieces connect to each other (`QAChain`); backend/frontend wiring not started
+- [ ] Error handling, logging, HIPAA audit trails (backend scope)
+- [ ] Caching layer (reduce LLM inference latency)
+- [x] Privacy audit within `ml/` — every Ollama/Neo4j call enforces local-only at the code level (`ml/local_only.py`), not just convention
+- **Deliverable**: Complete end-to-end system working — ✅ true for `ml/` in isolation (live-tested pipeline, including concurrent load); not yet true end-to-end through a UI
 
-**Month 3 Focus**: Fitness ML + wearable integration
-- Custom HAR fine-tuning on PHIRE user data (if available)
-- Wearable API integration (Fitbit, Oura, Apple Health)
-- Correlation analysis (activity patterns + health outcomes)
-- Fitness recommendation personalization
-- **Effort**: 180 hours
-- **Deliverable**: Multi-modal health recommendations
-
-### Phase 3: ML Models & Personalization (Months 4-6)
-
-**Month 4**: Nutrition recommendation model training
-- Collect 1-3 months real PHIRE nutrition data
-- Train custom nutrition recommendation model (collaborative filtering + content-based)
-- Integrate with evidence attribution (explain "why this recommendation")
-- **Effort**: 150 hours
-
-**Month 5**: Advanced temporal reasoning
-- Trajectory prediction (will my glucose worsen?)
-- Anomaly detection (unusual health patterns)
-- Multi-disease interaction modeling
-- **Effort**: 120 hours
-
-**Month 6**: Multimodal integration
-- Medical image understanding (X-rays, lab graphs)
-- Structured + unstructured data fusion
-- Explainability improvements (show reasoning)
-- **Effort**: 140 hours
-
-### Phase 4: Production Hardening & Research (Months 7-9)
-
-**Month 7**: Enterprise deployment
-- Multi-region setup (hospital networks)
-- Role-based access control (clinician vs. patient)
-- Advanced audit logging for compliance
-- **Effort**: 120 hours
-
-**Month 8**: Regulatory preparation
-- FDA 510(k) submission documentation
-- Clinical validation studies
-- Safety & efficacy write-ups
-- **Effort**: 100 hours
-
-**Month 9**: Publication & reproducibility
-- Paper 1: Evidence attribution + longitudinal reasoning
-- Paper 2: Hallucination detection + privacy-utility
-- Reproducible artifacts (code + benchmark + datasets)
-- Open-source release
-- **Effort**: 150 hours
+### Evaluation + Documentation
+- [ ] ArchEHR-QA 2026 evaluation (167 expert cases) — not started (Shashwati's scope)
+- [ ] Baseline metrics: evidence attribution precision/recall, claim extraction quality, hallucination rate, response latency
+- [x] Live end-to-end pipeline testing (`ml/tests/test_qa_chain_live_e2e.py`, real Ollama/Neo4j/Chroma, no mocks)
+- [ ] Demo personas + end-to-end workflow testing through a UI
+- [ ] README + deployment guide (backend/frontend scope; `ml/README.md` done)
+- [ ] CI/CD setup
 
 ---
 
-## 📈 Total Effort Breakdown
+## 📊 Core Feature Status
 
-| Phase | Varun (ML) | Anika (Backend) | Shashwati (Frontend + Eval) | Total |
-|-------|------------|------------------|--------------------------|-------|
-| **MVP (3 wk)** | 115 hrs | 125 hrs | 170 hrs | 410 hrs |
-| **Phase 2** | 100 hrs | 80 hrs | 80 hrs | 260 hrs |
-| **Phase 3** | 180 hrs | 100 hrs | 120 hrs | 400 hrs |
-| **Phase 4** | 120 hrs | 100 hrs | 200 hrs | 420 hrs |
-| **TOTAL** | 515 hrs | 405 hrs | 570 hrs | 1490 hrs |
-
-**Per person per week (9 months)**: 18-22 hours ✅ (realistic research load)
-**With AI agents (1.5x)**: ~12-15 hours per person per week (very achievable)
-
----
-
-## 🧠 AI Agent Acceleration Strategy
-
-### High-Speedup Tasks (3-5x with agents)
-- Boilerplate code generation (FastAPI routes, Next.js components)
-- Test case generation (unit + integration tests)
-- Documentation (API docs, deployment guides)
-- Docker/deployment automation
-
-### Medium-Speedup Tasks (2-3x with agents)
-- Model integration scaffolding (RAG, ML models)
-- Database migrations & schema management
-- API contract enforcement (Pydantic models)
-- CI/CD pipeline setup
-
-### Low-Speedup Tasks (1x, still human domain)
-- Architecture decisions (which tech stack?)
-- Research methodology (evaluation design)
-- Safety/security architecture
-- Regulatory compliance strategy
-- Paper writing (core ideas)
-
-### Net Effect: 1.5x Realistic Acceleration
-- Don't believe marketing hype (2-3x claims)
-- Plan conservatively (1.5x actual)
-- Allocate agent-generated code review time
-- Focus agents on high-repetition tasks
+| Feature | Status | Research Value |
+|---------|--------|-----------------|
+| Local LLM inference | ✅ | Baseline |
+| Evidence attribution | ✅ (ml/ pipeline; UI not built) | ⭐⭐⭐⭐⭐ |
+| Longitudinal reasoning | ✅ | ⭐⭐⭐⭐⭐ |
+| Hallucination detection | ✅ | ⭐⭐⭐⭐ |
+| Document ingestion | ✅ | ⭐⭐ |
+| Fitness recommendations | ❌ not started | ⭐⭐⭐⭐ |
+| Health timeline (graph) | ✅ (ml/ facts + trends; visualization not built) | ⭐⭐⭐⭐ |
+| ArchEHR-QA evaluation | ❌ not started | ⭐⭐⭐⭐ |
 
 ---
 
-## 🎯 Success Metrics (End of MVP)
+## 🎯 Extended Roadmap (Phased, Not Calendar-Bound)
+
+### Phase 2: Advanced Evidence & ML
+- [ ] Contradiction detection (conflicting lab values across visits) — see `docs/GRAPH_SCHEMA_ROADMAP.md` §3b (claim→evidence graph edges) for the prerequisite groundwork
+- [ ] Evidence ranking beyond current authority/recency (guidelines > RCTs > observational data)
+- [ ] Multi-modal document understanding (images + tables + text)
+- [ ] Start nutrition recommendation data collection
+- [ ] Privacy-utility benchmark (local vs. cloud models)
+
+### Phase 3: ML Models & Personalization
+- [ ] Nutrition recommendation model training
+- [ ] Fitness recommendation model (HAR fine-tuning, wearable integration)
+- [ ] Advanced temporal reasoning (trajectory prediction, anomaly detection)
+- [ ] Multi-disease interaction modeling
+
+### Phase 4: Multimodal + Multi-hop Retrieval
+- [ ] Multi-hop graph-RAG retrieval (LightRAG-style entity/relationship traversal) — **not yet implemented, outstanding work**, see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f
+- [ ] Medical image understanding (X-rays, lab graphs)
+- [ ] Structured + unstructured data fusion
+- [ ] Explainability improvements (show reasoning)
+
+### Phase 5: Hardening & Research
+- [ ] Advanced audit logging (local, single-user — see below)
+- [ ] Paper 1: Evidence attribution + longitudinal reasoning
+- [ ] Paper 2: Hallucination detection + privacy-utility
+- [ ] Reproducible artifacts (code + benchmark + datasets), open-source release
+
+**Note (2026-08-26)**: this phase previously listed "multi-region setup
+(hospital networks)," "role-based access control (clinician vs.
+patient)," and an FDA 510(k) regulatory pathway. Removed — PHIRE is a
+**single-user, single-instance, local-only personal health tool**, not a
+multi-tenant clinical system (see `CLAUDE.md`'s "wellness/decision-support
+tool, not a medical device" framing and `docs/GRAPH_SCHEMA_ROADMAP.md`'s
+"single-user-per-local-instance model, not a multi-tenant assumption" —
+both stated as permanent architecture, not just current MVP scope).
+Multi-tenant/RBAC/regulatory-clearance work is a different product
+category and out of scope, not a later phase of this one.
+
+---
+
+## 🎯 Success Metrics (Core Scope)
 
 ### Technical Success
-- ✅ Response latency <3 seconds end-to-end
-- ✅ Evidence attribution precision >85%
-- ✅ Hallucination rate reduced by 40%+ vs. baseline
-- ✅ ArchEHR-QA: 75%+ claims fully supported
-- ✅ Fitness recommendations working on demo data
-- ✅ Zero cloud data egress (privacy audit passes)
+- [ ] Response latency <3 seconds end-to-end (ml/ pipeline latency not yet benchmarked outside live-test runs)
+- [ ] Evidence attribution precision >85% (not yet measured against a real benchmark)
+- [ ] Hallucination rate reduced by 40%+ vs. baseline (not yet measured)
+- [ ] ArchEHR-QA: 75%+ claims fully supported (evaluation not started)
+- [ ] Fitness recommendations working on demo data (not started)
+- [x] Zero cloud data egress within `ml/` (local-only enforcement is code-level, not just audited)
 
 ### Research Success
-- ✅ Two publication-ready research questions answered
-- ✅ ArchEHR-QA benchmark results documented
-- ✅ Ablation studies show evidence attribution adds value
-- ✅ Reproducible code ready for GitHub
+- [ ] Two publication-ready research questions answered
+- [ ] ArchEHR-QA benchmark results documented
+- [ ] Ablation studies show evidence attribution adds value
+- [x] Reproducible code — `ml/` is on GitHub with a live-tested pipeline and dated findings log (`docs/RESEARCH_LOG.md`)
 
 ### Product Success
-- ✅ Clinician demo works flawlessly (3 personas)
-- ✅ README enables setup in <30 minutes
-- ✅ Code is clean, documented, production-ready
-- ✅ Deployment process automated (docker-compose)
+- [ ] End-user demo works flawlessly (individual using PHIRE for their own health data, end-to-end through a UI — not built yet)
+- [ ] README enables setup in <30 minutes (`ml/README.md` covers `ml/`; full-stack setup not yet documented end-to-end)
+- [x] `ml/` code is clean, documented, tested (200+ tests, static-analysis clean)
+- [ ] Deployment process automated (docker-compose)
 
 ---
 
-## 🛑 What's NOT in MVP (Explicitly Deferred)
+## 🛑 Explicitly Out of Current Scope
 
 - ❌ Advanced multimodal (images require more training data)
 - ❌ Federated learning (infrastructure overhead)
 - ❌ Voice interface (nice-to-have, not essential)
-- ❌ Multilingual support (English only for MVP)
+- ❌ Multilingual support (English only for now)
 - ❌ FHIR representation (extend after core works)
-- ❌ Wearable integration (simplified in MVP, full in Phase 3)
+- ❌ Wearable integration (Phase 3)
+- ❌ Multi-hop graph-RAG retrieval (Phase 4 — see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f; this is committed future scope, not indefinitely deferred)
 
-**Rationale**: Ship core innovation (evidence attribution) quickly, iterate on extensions.
+**Rationale**: Ship core innovation (evidence attribution) first, iterate on extensions.
 
 ---
 
 ## 🔬 Competitive Positioning
 
-**6-12 month window** to be first open-source system with:
-- ✅ Local inference (Ollama MedGemma)
-- ✅ Evidence attribution (MedRAGChecker)
-- ✅ Longitudinal reasoning (temporal LLM)
-- ✅ Fitness personalization (HAR + ML)
+Aiming to be among the first open-source systems with:
+- ✅ Local inference (Ollama + medgemma:4b)
+- ✅ Evidence attribution (NLI-based claim verification, not MedRAGChecker)
+- ✅ Longitudinal reasoning (graph-backed trend computation)
+- ❌ Fitness personalization (HAR + ML) — not started
 - ✅ Hallucination detection
 
 **Current competition**:
 - Google Med-PaLM 2: Excellent but cloud-only (privacy risk)
 - OpenAI GPT-4 Medical: Good but proprietary + expensive
 - Claude 3.5: Strong but not healthcare-specialized
-- **No one has all four together** (local + evidence + temporal + personalization)
+- No system studied combines local + evidence-attributed + longitudinal + personalized in one open-source stack
 
-**PHIRE advantage**: Be first, be open, be healthcare-specific, be published.
-
----
-
-## 📅 Timeline Summary
-
-```
-Week 1-3:    MVP (infrastructure + core features)
-Month 2:     Enhancement (evidence ranking, wearables)
-Month 3:     Fitness ML (model training, personalization)
-Month 4-6:   Nutrition ML (recommendation model)
-Month 7:     Production hardening (enterprise deployment)
-Month 8:     Regulatory (510(k) preparation)
-Month 9:     Publication (paper + open-source)
-```
-
-**Key milestone**: Ship MVP by end of Week 3 for user testing and feedback loop
+**PHIRE's angle**: local, evidence-attributed, open, healthcare-specific, published.
 
 ---
 
 ## 🎓 Research Contribution
 
-**Publication Target**: ACL 2027 or EMNLP 2026
-
-**Paper 1** (Months 4-5 writing):
+**Paper 1**:
 - Title: "Evidence-Attributed Medical Reasoning with Local LLMs"
-- Contributions: Claim extraction + verification + evaluation on ArchEHR-QA
-- Novelty: First open-source healthcare evidence attribution system
+- Contributions: Claim extraction + NLI-based verification + evaluation on ArchEHR-QA
+- Novelty: Open-source healthcare evidence attribution system, benchmarked model choices at every stage (see `ml/*/experiments/RESULTS.md`)
 
-**Paper 2** (Months 8-9 writing):
+**Paper 2**:
 - Title: "Longitudinal Health Reasoning & Privacy-Utility Trade-offs in Local Models"
-- Contributions: Temporal reasoning + hallucination reduction + privacy analysis
-- Novelty: Empirical study of 8B local vs 70B cloud models
+- Contributions: Temporal/trend reasoning + hallucination reduction + privacy analysis
+- Novelty: Empirical study of local model scale vs. cloud models on this task
 
 **Artifacts**:
 - Open-source code + models
 - ArchEHR-QA extended benchmark
-- Reproducibility package (code + data + configs)
+- Reproducibility package (code + data + configs); `docs/RESEARCH_LOG.md` already tracks dated findings/decisions for this
 
 ---
 
-**Status**: Aggressive but realistic
-**Risk Level**: Low (every component proven in 2023-2026 research)
-**Team Capacity**: Exactly matched to 9-month timeline
-**Competitive Window**: 6-12 months (move fast)
-
-Ready to execute.
+**Status**: Core `ml/` scope implemented and live-tested; backend/frontend integration and extended phases outstanding.
+**Risk Level**: Low for what's built (every component benchmarked, live-tested); unestimated for what isn't.

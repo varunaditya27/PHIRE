@@ -14,9 +14,10 @@
 
 **Tech Stack Ownership**:
 - **LLM Prompting**: Prompt engineering, chain-of-thought, reasoning
-- **RAG System**: Evidence retrieval, ranking, reranking
-- **MedRAGChecker**: Claim verification, entailment, confidence scoring
-- **LangChain**: LLM chains, tool integration, RAG orchestration
+- **RAG System**: Evidence retrieval, ranking, reranking (MedCPT dual encoder + cross-encoder)
+- **Claim Verification**: NLI-based entailment/contradiction scoring (BART-large-MNLI), confidence scoring
+- **QA Orchestration**: Hand-written pipeline (`ml/chains/qa_chain.py`) — evaluated LangChain, went custom instead (see `docs/OPEN_SOURCE_TOOLS.md`)
+- **Longitudinal Health Graph**: Neo4j, queried directly via Cypher (`ml/graph/`)
 - **ML Models**: Fitness HAR, nutrition recommendations, embeddings
 - **Sentence Transformers**: Medical embeddings, semantic search
 - **Model Training**: Fine-tuning, recommendation system development
@@ -25,13 +26,13 @@
 
 1. **Claim Extraction & Verification (Core Innovation)**
    - LLM prompts for atomic claim decomposition
-   - MedRAGChecker integration (evidence grounding)
-   - Confidence scoring (SUPPORTED/DERIVED/INFERRED/UNCERTAIN)
+   - NLI-based evidence grounding (`ml/claims/verifier.py`, BART-large-MNLI — chosen after benchmarking 6 candidates including medical-specialized models)
+   - Status taxonomy: SUPPORTED / DERIVED / CONFLICTING / UNCERTAIN / UNSUPPORTED — DERIVED is a relabel applied one layer up (`ml/chains/qa_chain.py`) for claims that match a precomputed trend; INFERRED (multi-hop reasoning) is not implemented, no validated signal for it yet
    - Claim-to-evidence mapping for frontend
 
 2. **RAG Pipeline**
-   - LangChain chains (retrieval → LLM → verification)
-   - Hybrid search (BM25 + semantic)
+   - Hand-written retrieval → generate → verify chain (`ml/chains/qa_chain.py`)
+   - Hybrid search (BM25 + semantic, reciprocal rank fusion)
    - Evidence reranking (authority, recency, relevance)
    - Source passage extraction with locations
 
@@ -62,14 +63,6 @@ GET  /api/recommendations/fitness # personalized fitness suggestions
 GET  /api/recommendations/nutrition # nutrition recommendations
 ```
 
-**Effort (MVP)**: 140 hours
-- RAG system: 40 hrs
-- Prompt engineering: 30 hrs
-- MedRAGChecker: 25 hrs
-- Claim extraction: 20 hrs
-- Recommendations: 20 hrs
-- Integration: 5 hrs
-
 **Non-Blocking**: 
 - Use mock Ollama responses (simulate LLM)
 - Test on synthetic data (Synthea)
@@ -82,12 +75,12 @@ GET  /api/recommendations/nutrition # nutrition recommendations
 **Primary Domain**: Everything that keeps data local and secure
 
 **Tech Stack Ownership**:
-- **Ollama + MedGemma 1.5**: Model serving, quantization, inference
+- **Ollama + medgemma:4b**: Model serving, quantization, inference
 - **FastAPI**: API design, async routing, validation (Pydantic)
-- **PostgreSQL**: Schema, migrations, encryption, audit logging
-- **Chroma Vector DB**: Embedding pipeline, retrieval indexes
+- **PostgreSQL**: Schema, migrations, encryption, audit logging (relational only — Chroma is the vector store, not pgvector)
+- **Chroma Vector DB**: Embedding pipeline, retrieval indexes (in-process, `ml/rag/retriever.py` owns the client)
 - **Docker & Deployment**: Containerization, docker-compose, CI/CD
-- **Document Processing**: PDF extraction (Docling), OCR, normalization
+- **Document Processing**: already implemented in `ml/rag/ingest/` (pypdf for text PDFs, olmOCR-v2 for scans/photos) — Anika's scope here is backend wiring (`POST /api/documents/upload` calling into `ml/`), not building extraction from scratch
 - **HIPAA Compliance**: Audit trails, data retention, security
 - **DevOps**: Scripts, deployment automation, health checks
 
@@ -111,10 +104,10 @@ GET  /api/recommendations/nutrition # nutrition recommendations
    - Reranking pipeline
    - Evidence embedding & storage
 
-4. **Document Processing**
-   - PDF parsing (Docling) with layout preservation
-   - Table extraction & normalization
-   - Source provenance tracking (page numbers)
+4. **Document Processing** (extraction implemented in `ml/rag/ingest/`; Anika's scope is backend wiring, not the extraction logic itself)
+   - PDF/OCR text extraction (pypdf + olmOCR-v2, `ml/rag/ingest/patient_documents.py`) with layout-aware table parsing
+   - Table extraction & normalization (`ml/rag/ingest/table_parsing.py`)
+   - Source provenance tracking (exact character spans, `ml/rag/ingest/chunking.py`)
    - Metadata enrichment
 
 5. **Security & Privacy**
@@ -134,13 +127,6 @@ POST /api/health                      # Service health check
 GET  /api/search/evidence            # Full-text + semantic search
 ```
 
-**Effort (MVP)**: 125 hours
-- Infrastructure setup: 30 hrs
-- FastAPI backend: 40 hrs
-- Document pipeline: 25 hrs
-- Database & encryption: 20 hrs
-- Integration & optimization: 10 hrs
-
 **Non-Blocking**: 
 - Build APIs with mock LLM responses
 - Build backend independently
@@ -155,7 +141,7 @@ GET  /api/search/evidence            # Full-text + semantic search
 - **Next.js 15**: Frontend framework, server components, routing
 - **React**: Components, hooks, state management
 - **TypeScript**: Type safety, props validation
-- **Tailwind CSS**: Styling, responsive design, clinician UX
+- **Tailwind CSS**: Styling, responsive design, individual-user UX (PHIRE is single-user/self-service, not clinician-facing)
 - **Evaluation Framework**: Metrics, benchmarking, statistical testing
 - **ArchEHR-QA 2026**: Integration, benchmark runner, failure analysis
 - **Data Science**: Pandas, numpy, scikit-learn, scipy
@@ -175,7 +161,7 @@ GET  /api/search/evidence            # Full-text + semantic search
 2. **Evidence Display (Core UX)**
    - Clickable claims (highlight on hover)
    - Source passage highlighting
-   - Evidence strength badges (SUPPORTED, INFERRED, etc.)
+   - Evidence strength badges (SUPPORTED, DERIVED, CONFLICTING, UNCERTAIN, UNSUPPORTED)
    - Interactive evidence sidebar
    - Citation tooltips
 
@@ -264,15 +250,6 @@ evaluation/
       └── statistical_tests.ipynb
 ```
 
-**Effort (MVP)**: 170 hours
-- Frontend chat UI: 40 hrs
-- Evidence display component: 25 hrs
-- Timeline visualization: 20 hrs
-- Document upload & management: 15 hrs
-- Evaluation framework: 30 hrs
-- ArchEHR-QA integration: 20 hrs
-- Metrics & statistical analysis: 20 hrs
-
 **Non-Blocking**: 
 - Build frontend with mock API responses
 - Create evaluation scripts without live system
@@ -285,23 +262,23 @@ evaluation/
 
 ### WEEK 1: Foundation (All Three Building Independently)
 
-**Varun** (40 hrs) - ML & Intelligence:
-- [ ] Download embedding model (medical-specialized)
-- [ ] Setup Chroma vector DB (native Python)
-- [ ] Ingest 50+ clinical reference documents
-- [ ] Design LLM prompt for claim extraction (v1)
-- [ ] Design MedRAGChecker integration
-- [ ] Mock RAG chain (doesn't need Anika's API yet)
+**Varun** - ML & Intelligence: — all done
+- [x] Download embedding model (medical-specialized) — MedCPT, benchmarked against 6 candidates
+- [x] Setup Chroma vector DB (native Python)
+- [x] Ingest 50+ clinical reference documents — PubMed/MedlinePlus/USDA corpus
+- [x] Design LLM prompt for claim extraction (v1)
+- [x] Design claim verification approach — NLI-based (BART-large-MNLI), not MedRAGChecker (not installable, see `docs/OPEN_SOURCE_TOOLS.md`)
+- [x] Real RAG chain implemented (`ml/chains/qa_chain.py`) — superseded the original mock-chain plan
 
-**Anika** (40 hrs) - Backend Infrastructure:
-- [ ] Ollama + MedGemma 1.5 running locally
-- [ ] PostgreSQL + pgvector Docker setup
+**Anika** - Backend Infrastructure:
+- [ ] Ollama + medgemma:4b running locally
+- [ ] PostgreSQL Docker setup (Chroma is the vector store, not pgvector — see `ml/rag/retriever.py`)
 - [ ] FastAPI project scaffold (routes, logging)
 - [ ] Basic API endpoints (health check, upload stub)
 - [ ] Docker-compose file for all services
 - [ ] Database schema + migrations
 
-**Shashwati** (50 hrs) - Frontend & Evaluation:
+**Shashwati** - Frontend & Evaluation:
 - [ ] Next.js 15 project setup (app router, TypeScript)
 - [ ] Chat component scaffold (input + response display)
 - [ ] Tailwind CSS + responsive layout
@@ -311,21 +288,21 @@ evaluation/
 
 ### WEEK 2: Feature Implementation (Start Integration)
 
-**Varun** (50 hrs) - ML & Intelligence:
-- [ ] Implement RAG chain (retrieve → rerank → LLM → claims)
-- [ ] Implement claim extraction from LLM output
-- [ ] Integrate MedRAGChecker (evidence verification)
-- [ ] Implement fitness recommendation engine
-- [ ] Format responses for frontend (JSON claims + evidence)
+**Varun** - ML & Intelligence:
+- [x] Implement RAG chain (retrieve → rerank → LLM → claims)
+- [x] Implement claim extraction from LLM output
+- [x] Implement NLI-based claim verification (`ml/claims/verifier.py`)
+- [ ] Implement fitness recommendation engine — not started (`ml/recommendations/` is still stubs)
+- [x] Format responses for frontend (JSON claims + evidence) — `ChatResponse`/`VerifiedClaim` dataclasses, JSON-serializable
 
-**Anika** (35 hrs) - Backend Infrastructure:
+**Anika** - Backend Infrastructure:
 - [ ] Implement `/api/documents/upload` endpoint
 - [ ] Implement document processing pipeline
 - [ ] Create `/api/patient/{id}/observations` endpoint
 - [ ] Implement health timeline construction
 - [ ] Add HIPAA audit logging
 
-**Shashwati** (50 hrs) - Frontend & Evaluation:
+**Shashwati** - Frontend & Evaluation:
 - [ ] Connect Next.js frontend to Anika's FastAPI backend
 - [ ] Implement ChatInterface component (consume `/api/chat`)
 - [ ] Implement EvidenceDisplay component (show sources)
@@ -335,22 +312,22 @@ evaluation/
 
 ### WEEK 3: Polish & Evaluation (Final Integration)
 
-**Varun** (25 hrs) - ML & Intelligence:
-- [ ] Fine-tune prompts based on early results
-- [ ] Improve evidence ranking (test strategies)
-- [ ] Optimize recommendation quality
-- [ ] End-to-end testing (full workflows)
-- [ ] Handle edge cases (empty results, conflicting evidence)
+**Varun** - ML & Intelligence:
+- [ ] Fine-tune prompts based on real chat traffic (blocked on backend integration)
+- [x] Improve evidence ranking — reranker weight-tuning benchmark + patient-document floor fix (`ml/rag/reranker_experiments/RESULTS.md`)
+- [ ] Optimize recommendation quality — not started (`ml/recommendations/` is still stubs)
+- [x] End-to-end testing (full workflows) — live pipeline tests against real Ollama/Neo4j/Chroma (`ml/tests/test_qa_chain_live_e2e.py`)
+- [x] Handle edge cases (empty results, conflicting evidence, abstention)
 
-**Anika** (30 hrs) - Backend Infrastructure:
+**Anika** - Backend Infrastructure:
 - [ ] Performance optimization (caching, query tuning)
 - [ ] Production-grade error handling
 - [ ] Deploy docker-compose setup
 - [ ] Privacy audit (no cloud egress verification)
 - [ ] Health checks & monitoring
 
-**Shashwati** (45 hrs) - Frontend & Evaluation:
-- [ ] Polish frontend UI (styling, animations, clinician UX)
+**Shashwati** - Frontend & Evaluation:
+- [ ] Polish frontend UI (styling, animations, individual-user UX)
 - [ ] Frontend error handling (network errors, fallbacks)
 - [ ] Accessibility (keyboard nav, WCAG AA compliance)
 - [ ] Mobile responsiveness (tablets, different screens)
@@ -377,7 +354,7 @@ Each person: status + blockers + dependencies
 
 ## ✅ MVP Deliverables (End of Week 3)
 
-- ✅ Clinician can upload lab report
+- ✅ User can upload their own lab report (PHIRE is single-user/self-service — not clinician-facing; the individual uploads their own records)
 - ✅ Ask health questions
 - ✅ See answers with evidence highlighted (clickable)
 - ✅ View health timeline

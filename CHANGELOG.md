@@ -67,18 +67,6 @@ All notable changes to this project will be documented in this file.
 - ArchEHR-QA accuracy: >75% claims fully supported
 - Zero cloud data egress (privacy audit passes)
 
-**Effort Estimate (MVP)**
-- **Total**: 410 hours (3 weeks, ~137 hours per person)
-- **Varun (ML)**: 115 hours
-- **Anika (Backend)**: 125 hours
-- **Shashwati (Frontend + Eval)**: 170 hours
-
-**Extended Timeline (9 months)**
-- **Phase 2 (Months 2-3)**: Advanced evidence & ML, wearable integration (260 hrs)
-- **Phase 3 (Months 4-6)**: ML models & personalization (400 hrs)
-- **Phase 4 (Months 7-9)**: Production hardening, regulatory, publication (420 hrs)
-- **Total Extended**: 1,490 hours (~165 hours per person per month)
-
 **Research Contributions (Publication-Ready)**
 - Paper 1 (Month 4-5): Evidence attribution + longitudinal reasoning
 - Paper 2 (Month 8-9): Hallucination detection + privacy-utility trade-offs
@@ -91,7 +79,6 @@ All notable changes to this project will be documented in this file.
 - ✅ Native vector DB (Chroma) for MVP simplicity
 - ✅ Evidence-first design (every claim has sources)
 - ✅ Three-person team with clear role division
-- ✅ Aggressive but realistic 1.5x AI agent acceleration
 - ✅ Computer vision as Month 2+ extension (not MVP bloat)
 
 **Disclaimer**
@@ -99,7 +86,102 @@ PHIRE is NOT a medical device and NOT a substitute for professional medical advi
 
 ---
 
+## [0.2.0] - 2026-08-16
+
+### ml/: RAG core, claim verification, and Longitudinal Health Graph
+
+The bulk of `ml/`'s core pipeline landed in this session — retrieval,
+reranking, claim extraction/verification, patient document ingestion, and
+the first version of the Neo4j-backed graph layer.
+
+**Added**
+- Hybrid retrieval: MedCPT dual-encoder embeddings + BM25, fused via
+  reciprocal rank fusion (`ml/rag/embeddings.py`, `ml/rag/retriever.py`)
+- Reranking: MedCPT cross-encoder + authority/recency scoring, with a
+  patient-document floor fix for reference-corpus ties
+  (`ml/rag/reranker.py`, benchmarked in `ml/rag/reranker_experiments/`)
+- Reference-evidence ingestion: PubMed, MedlinePlus, USDA FoodData Central
+  (`ml/rag/ingest/run_ingest.py`)
+- `ml/llm/`: Ollama client, prompt templates, context assembly — with
+  local-only enforcement (`ml/local_only.py`) shared across every
+  Ollama/Neo4j client
+- Claim extraction, NLI-based verification (BART-large-MNLI, benchmarked
+  against 5 other candidates), and confidence scoring
+  (`ml/claims/`, `ml/chains/qa_chain.py`)
+- Patient document ingestion: olmOCR-v2 for scanned/photographed
+  documents (benchmarked against olmOCR-v1), table-aware chunking, exact
+  character-span citation tracking (`ml/rag/ingest/`)
+- Longitudinal Health Graph v1: deterministic Observation extraction from
+  tables, schema-constrained LLM extraction of prose facts (benchmarked
+  hand-rolled extraction vs. Google LangExtract), Medication/Condition
+  node types (`ml/graph/`)
+
+**Fixed**
+- Security/correctness bugs found in a full `ml/` code review: a
+  prefix/substring-based localhost check that a hostname like
+  `localhost.attacker.example` could bypass (replaced with proper
+  hostname parsing, `ml/local_only.py`); a table/prose observation
+  dedup bug that misreported ingested counts
+
+**Docs**
+- `docs/ML_HANDOFF_FOR_ANIKA.md` — integration contract for `backend/`
+- `docs/GRAPH_SCHEMA_ROADMAP.md` — graph schema, deferred work, trigger conditions
+
+## [0.3.0] - 2026-08-25
+
+### Graph read path, OCR routing, and a correctness/coverage hardening pass
+
+**Added**
+- Read path for the graph layer: current patient facts and precomputed
+  trend deltas fed into chat generation, with `DERIVED` claim labeling
+  for a claim that matches a precomputed trend rather than asking NLI to
+  do arithmetic (`ml/graph/patient_context.py`, `ml/chains/qa_chain.py`)
+- RapidOCR-based pre-pass to route scanned PDFs to the full olmOCR pass
+  only when needed (`ml/rag/ingest/router_experiments/`)
+- `ml/tests/test_qa_chain_live_e2e.py` — full pipeline test against real
+  Ollama/Neo4j/Chroma/MedCPT/BART-MNLI, no fakes
+- 41 new tests across graph unit coverage, verification-pool capping,
+  and date-parsing edge cases
+
+**Fixed**
+- A privacy-boundary gap: one Ollama call site (`ml/graph/prose_extraction.py`,
+  the module handling the most PHI-sensitive free text in the codebase)
+  wasn't enforcing the local-only check applied everywhere else
+- A document-dating bug: a document listing a patient's date of birth
+  before its own service date got every Observation from that document
+  silently misdated to the birth year; date parsing is now day-first
+  (PHIRE's primary audience is Indian users/clinics — DD/MM/YYYY, not
+  the US MM/DD/YYYY convention) and excludes DOB-labeled dates
+- Lab-value parsing: negative values (e.g. blood-gas base excess) no
+  longer silently fail to parse; a compound systolic/diastolic reading
+  ("148/92 mmHg") is now correctly treated as unparseable for this
+  schema instead of silently truncating to a corrupted value+unit pair
+- An unbounded claim-verification pool — capped so NLI verification cost
+  doesn't grow unbounded with patient history
+- A live-corpus contamination issue: 21 chunks from earlier OCR-benchmark
+  fixture ingestion were sitting in the real Chroma reference store at
+  the same authority tier as genuine patient data, found via live
+  end-to-end testing
+- Dead `langchain` dependency removed from `ml/requirements.txt`
+  (never imported — `ml/chains/qa_chain.py` is hand-written orchestration)
+
+**Docs**
+- `docs/RESEARCH_LOG.md` added — dated findings/decisions in a form
+  reusable for paper drafting
+- `ml/README.md` added — `ml/` subsystem overview, quick start, model
+  choices, feature status
+- README.md, REPO_STRUCTURE.md, CONTRIBUTING.md, GET_STARTED.md,
+  `docs/FEATURES_ALIGNED.md`, `docs/AGGRESSIVE_ROADMAP.md`,
+  `docs/GRAPH_SCHEMA_ROADMAP.md`, `docs/OPEN_SOURCE_TOOLS.md`, and
+  `docs/PHIRE_STRUCTURED_GRAPH_MEDICAL_CORPUS_IMPLEMENTATION.md` audited
+  and corrected for staleness (stale tool references from initial
+  planning — MedRAGChecker, LangChain, MedGemma "1.5"/"8B", pgvector,
+  Docling — that were superseded by what was actually built but never
+  updated in these docs)
+
+---
+
 ## Future Versions
 
-See `docs/AGGRESSIVE_ROADMAP.md` for month-by-month breakdown of Phases 2-4.
+See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.
 
