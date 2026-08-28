@@ -12,7 +12,9 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from sqlalchemy import update
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
 from app.database.connection import get_db
@@ -48,22 +50,30 @@ async def upload_document(
 
     settings = get_settings()
     upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
 
     document_id = uuid.uuid4()
     extension = SUPPORTED_FILE_TYPES[file.content_type]
     storage_path = upload_dir / f"{document_id}{extension}"
-    storage_path.write_bytes(contents)
 
-    document = Document(
-        id=document_id,
-        filename=file.filename or storage_path.name,
-        content_type=file.content_type,
-        storage_path=str(storage_path),
-        status=DocumentStatus.UPLOADED.value,
-    )
-    db.add(document)
-    db.commit()
+    def _write_and_record() -> Document:
+        # mkdir/write_bytes/commit are all blocking calls -- run off the
+        # event loop (this handler is async def for read_upload_within_limit's
+        # await above) so a large upload doesn't stall every other
+        # concurrent request this worker is serving.
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        storage_path.write_bytes(contents)
+        document = Document(
+            id=document_id,
+            filename=file.filename or storage_path.name,
+            content_type=file.content_type,
+            storage_path=str(storage_path),
+            status=DocumentStatus.UPLOADED.value,
+        )
+        db.add(document)
+        db.commit()
+        return document
+
+    document = await run_in_threadpool(_write_and_record)
 
     background_tasks.add_task(_run_processing, document_id)
 
@@ -76,19 +86,28 @@ def reprocess_document(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> DocumentUploadResponse:
-    document = db.get(Document, document_id)
-    if document is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    if document.status == DocumentStatus.PROCESSING.value:
-        raise HTTPException(status_code=409, detail="Document is already being processed.")
-
-    # Flip status here, synchronously, rather than leaving it to
-    # process_document()'s own PROCESSING write -- that write doesn't
-    # happen until the background task actually runs, so two rapid calls
-    # would both pass the check above and both get scheduled.
-    document.status = DocumentStatus.PROCESSING.value
+    # A read-then-write check (SELECT status, then UPDATE if not
+    # PROCESSING) isn't atomic across two concurrent requests -- each has
+    # its own DB session/transaction, so both can read the pre-update
+    # status before either commits (found via review). A single
+    # conditional UPDATE is: Postgres row-locks the row for the first
+    # transaction's UPDATE, so a second concurrent UPDATE targeting the
+    # same id blocks until the first commits, then re-evaluates the WHERE
+    # clause against the now-PROCESSING row and matches zero rows.
+    result = db.execute(
+        update(Document)
+        .where(Document.id == document_id, Document.status != DocumentStatus.PROCESSING.value)
+        .values(status=DocumentStatus.PROCESSING.value)
+    )
     db.commit()
 
+    if result.rowcount == 0:
+        document = db.get(Document, document_id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(status_code=409, detail="Document is already being processed.")
+
+    document = db.get(Document, document_id)
     background_tasks.add_task(_run_processing, document_id)
     return DocumentUploadResponse(id=document.id, filename=document.filename, status=DocumentStatus.PROCESSING)
 

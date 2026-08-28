@@ -79,6 +79,21 @@ def test_answer_includes_only_supported_high_confidence_claims():
     assert len(response.claims) == 3  # full audit trail retained even for dropped claims
 
 
+def test_unsupported_claim_with_no_matched_evidence_gets_zero_confidence():
+    # verification.evidence is None exactly when ClaimVerifier.verify()'s
+    # own pool was empty (see its docstring) -- confidence must reflect
+    # "no evidence," not the retrieval-only floor a rank of 0 would give
+    # it (found via review: `next(..., len(evidence))`'s old fallback
+    # collided with a real rank of 0 for this exact case).
+    claims = ["Unsupported claim."]
+    verdicts = {"Unsupported claim.": ClaimVerification("Unsupported claim.", "UNSUPPORTED", 0.0, 0.0, None)}
+    chain = build_chain(claims, verdicts)
+
+    response = chain.answer("question")
+
+    assert response.claims[0].confidence == 0.0
+
+
 def test_answer_falls_back_to_no_evidence_message_when_nothing_supported():
     claims = ["Conflicting claim."]
     verdicts = {"Conflicting claim.": ClaimVerification("Conflicting claim.", "CONFLICTING", 0.05, 0.9, EVIDENCE[0])}
@@ -201,6 +216,27 @@ def test_answer_respects_explicit_observations_override():
     assert response.answer == "Supported claim."
 
 
+def test_answer_degrades_gracefully_when_graph_is_unreachable():
+    # CLAUDE.md documents the graph layer as "not MVP-blocking" -- a
+    # Neo4j outage shouldn't 502 a question that never needed patient
+    # facts (found via review: answer() previously let any GraphClient
+    # exception propagate uncaught).
+    class BrokenGraphClient:
+        def run(self, query, **params):
+            raise ConnectionError("Neo4j unreachable")
+
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+    chain = QAChain(
+        retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
+        verifier=FakeVerifier(verdicts), llm_client=FakeLLM(), graph_client=BrokenGraphClient(),
+    )
+
+    response = chain.answer("question")  # must not raise
+
+    assert response.answer == "Supported claim."
+
+
 def test_verification_pool_caps_patient_facts_at_max_fact_evidence(monkeypatch):
     # Regression for the unbounded-pool latency risk: ClaimVerifier.verify()
     # runs a full NLI forward pass per pool chunk per claim, so a patient
@@ -259,10 +295,26 @@ def test_verification_pool_caps_trend_facts_independently_of_patient_facts(monke
 
 
 def test_verified_claim_has_no_source_span_when_evidence_lacks_offsets():
+    # no_span_evidence must actually be part of the pool passed to
+    # verify() (a custom reranker returning it, not the module-level
+    # EVIDENCE/build_chain default), not just the FakeVerifier's canned
+    # return value -- _verify_claim looks up the matched chunk's rank
+    # within that pool by identity, same as the real ClaimVerifier
+    # guarantees (found via review: this test previously papered over
+    # that by returning a chunk id absent from the actual pool, which
+    # only worked because of the very rank-lookup bug being fixed).
     no_span_evidence = Chunk(id="e2", text="evidence", metadata={"authority": 0.8})
     claims = ["Supported claim."]
     verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, no_span_evidence)}
-    chain = build_chain(claims, verdicts)
+
+    class NoSpanReranker:
+        def rerank(self, query, chunks, top_k):
+            return [no_span_evidence]
+
+    chain = QAChain(
+        retriever=FakeRetriever(), reranker=NoSpanReranker(), extractor=FakeExtractor(claims),
+        verifier=FakeVerifier(verdicts), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
+    )
 
     response = chain.answer("question")
 

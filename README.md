@@ -135,6 +135,8 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 - **[GET_STARTED.md](GET_STARTED.md)** - First-day setup & onboarding checklist
 - **[ml/README.md](ml/README.md)** - `ml/` subsystem: architecture, quick start, model choices, feature status
 - **[backend/README.md](backend/README.md)** - `backend/` subsystem: API surface, architecture, configuration, quick start
+- **[docs/API_REFERENCE.md](docs/API_REFERENCE.md)** - Full request/response reference for every backend endpoint
+- **[docs/FRONTEND_HANDOFF.md](docs/FRONTEND_HANDOFF.md)** - Start here for `frontend/` work: what's built, how to run the stack, gotchas
 - **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap (MVP + extended, aligned to NLP-06)
 - **[docs/AGGRESSIVE_ROADMAP.md](docs/AGGRESSIVE_ROADMAP.md)** - Build checklist: core MVP + extended features
 - **[docs/OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md)** - 40+ open-source tools & integration guide

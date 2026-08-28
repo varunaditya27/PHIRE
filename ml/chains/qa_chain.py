@@ -105,8 +105,9 @@ class QAChain:
         (ml/graph/patient_context.py) -- callers only need to pass it
         explicitly to override that default (e.g. tests).
         """
+        history_facts, current_facts, trend_facts = self._graph_facts(need_history=observations is None)
         if observations is None:
-            observations = get_patient_facts(self._graph_client) + get_trend_facts(self._graph_client)
+            observations = history_facts + trend_facts
 
         # Wide candidate pool before reranking, not just top_k*2: a
         # specific patient fact (one line, narrow match) competes against
@@ -135,7 +136,7 @@ class QAChain:
         # a new one (also verified live). Listed first so a patient fact
         # wins ties over a topically-similar reference chunk when both
         # score similarly informative.
-        patient_evidence = self._facts_to_chunks(get_current_patient_facts(self._graph_client), source="patient_record")
+        patient_evidence = self._facts_to_chunks(current_facts, source="patient_record")
         # A trend claim ("your LDL increased 29 points") is arithmetic on
         # two Observations, not something NLI can verify against a single
         # fact sentence -- get_trend_facts precomputes the delta as its
@@ -143,13 +144,39 @@ class QAChain:
         # can relabel a match here as DERIVED rather than SUPPORTED (see
         # ml/claims/verifier.py's docstring for why DERIVED can't be
         # implemented as an NLI-only distinction).
-        derived_evidence = self._facts_to_chunks(get_trend_facts(self._graph_client), source="patient_derived")
+        derived_evidence = self._facts_to_chunks(trend_facts, source="patient_derived")
         verification_pool = patient_evidence + derived_evidence + evidence
 
         verified = [self._verify_claim(claim, verification_pool) for claim in self._extractor.extract(draft_answer)]
         supported = [c for c in verified if c.status in ("SUPPORTED", "DERIVED") and c.confidence >= ABSTENTION_THRESHOLD]
         answer = " ".join(c.claim for c in supported) if supported else NO_EVIDENCE_MESSAGE
         return ChatResponse(answer=answer, claims=verified)
+
+    def _graph_facts(self, need_history: bool) -> tuple[list[str], list[str], list[str]]:
+        """(history facts, current facts, trend facts) from the graph, or three empty
+        lists if Neo4j is unreachable.
+
+        The graph layer is documented (CLAUDE.md) as "not MVP-blocking" --
+        a general question with no patient-specific content shouldn't
+        502 the whole request just because Neo4j is down; it should just
+        lose the patient-specific/trend grounding for that turn. Fetched
+        together in one try/except (not one per call site) so a partial
+        graph outage can't leave observations/current_facts/trend_facts
+        in an inconsistent mix of real and empty. get_trend_facts is only
+        computed once, reused for both the prompt-context `observations`
+        and the trend-claim verification pool below, instead of querying
+        the graph for the identical result twice.
+        """
+        history_facts: list[str] = []
+        try:
+            if need_history:
+                history_facts = get_patient_facts(self._graph_client)
+            current_facts = get_current_patient_facts(self._graph_client)
+            trend_facts = get_trend_facts(self._graph_client)
+        except Exception as exc:  # noqa: BLE001 -- degrade, not crash; see docstring
+            print(f"QAChain: graph unavailable, answering without patient-graph facts: {exc}")
+            return [], [], []
+        return history_facts, current_facts, trend_facts
 
     @staticmethod
     def _facts_to_chunks(facts: list[str], source: str) -> list[Chunk]:
@@ -176,10 +203,21 @@ class QAChain:
     def _verify_claim(self, claim: str, evidence: list[Chunk]) -> VerifiedClaim:
         """Verify one claim and fold its verdict into a confidence score + source citation."""
         verification = self._verifier.verify(claim, evidence)
-        rank = next((i for i, c in enumerate(evidence) if verification.evidence and c.id == verification.evidence.id), len(evidence))
-        metadata = verification.evidence.metadata if verification.evidence else {}
-        authority = metadata.get("authority", 0.0)
-        confidence = compute_confidence(verification.entailment_prob, verification.contradiction_prob, rank, authority)
+        if verification.evidence is None:
+            # No matched chunk (empty verification pool -- see
+            # ClaimVerifier.verify()'s docstring) means literally no
+            # evidence to base a rank/authority-weighted confidence on.
+            # `next(..., len(evidence))`'s old fallback collided with a
+            # real rank of 0 when evidence was empty (len([])==0), giving
+            # a zero-evidence claim compute_confidence's retrieval-only
+            # floor (0.25) instead of ~0 -- found via review.
+            metadata: dict = {}
+            confidence = 0.0
+        else:
+            rank = next(i for i, c in enumerate(evidence) if c.id == verification.evidence.id)
+            metadata = verification.evidence.metadata
+            authority = metadata.get("authority", 0.0)
+            confidence = compute_confidence(verification.entailment_prob, verification.contradiction_prob, rank, authority)
         status = verification.status
         # A SUPPORTED match against a patient_derived chunk means the
         # claim restated a precomputed trend (arithmetic PHIRE already

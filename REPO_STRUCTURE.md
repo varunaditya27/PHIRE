@@ -252,6 +252,8 @@ phire/
 - `scripts/` - Setup and run scripts
 
 ### Shashwati (Frontend & Evaluation)
+- `docs/FRONTEND_HANDOFF.md` - Start here: what's built in backend/ml, how to run the stack, gotchas
+- `docs/API_REFERENCE.md` - Full request/response reference for every endpoint
 - `frontend/` - Next.js application, UI components
 - `evaluation/` - All metrics and benchmarking
 - `evaluation/results/` - Metrics output, figures for paper

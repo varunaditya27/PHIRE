@@ -13,12 +13,16 @@ from fastapi import APIRouter
 
 from app.models.response import EvidenceCitation
 from app.services.citations import chunk_to_citation
-from app.services.ml_singletons import get_retriever
+from app.services.ml_singletons import GPU_LOCK, get_retriever
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.get("/evidence", response_model=list[EvidenceCitation])
 def search_evidence(query: str, top_k: int = 5) -> list[EvidenceCitation]:
-    chunks = get_retriever().retrieve(query, top_k=top_k)
+    # GPU_LOCK: see ml_singletons.py's docstring -- get_retriever() uses
+    # the GPU-resident MedCPT embedding model, same as chat generation and
+    # document ingestion.
+    with GPU_LOCK:
+        chunks = get_retriever().retrieve(query, top_k=top_k)
     return [chunk_to_citation(chunk) for chunk in chunks]

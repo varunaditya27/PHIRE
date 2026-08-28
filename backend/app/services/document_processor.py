@@ -9,7 +9,11 @@ ml/'s pipeline does OCR routing, table-aware chunking, exact char-span
 citations, and structured graph fact extraction; backend's prior
 standalone parser (PyMuPDF + a regex lab-line matcher) did none of that.
 This module is orchestration only: it drives ml/'s building blocks
-against one uploaded Document row and updates that row's status.
+against one uploaded Document row and updates that row's status. On
+failure, also rolls back whatever Chroma chunks/Neo4j facts this
+document_id's ingestion already wrote (see _rollback_ml_writes) -- a
+Document row marked FAILED should mean this document contributed no data
+anywhere, not just that its own Postgres row got rolled back.
 
 VRAM ordering: the whole ml/-facing pipeline below (Ollama OCR/prose
 extraction, then MedCPT embedding via get_retriever()) runs under
@@ -23,6 +27,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database.schemas import Document
 from app.services.ml_singletons import GPU_LOCK, get_retriever, new_graph_client
 from app.utils.constants import DocumentStatus
@@ -66,7 +71,12 @@ def process_document(db: Session, document: Document) -> None:
             effective_date = find_document_date(text)
 
             table_observations = build_table_observations(text, document_id, effective_date)
-            facts = extract_facts(text)
+            # Threaded through explicitly rather than relying on
+            # extract_facts()'s own default -- backend/.env's
+            # PROSE_EXTRACTION_MODEL was previously silently ignored here
+            # (found via review), same reasoning as ml_singletons.py's
+            # "constructor args passed explicitly from Settings" note.
+            facts = extract_facts(text, model=get_settings().prose_extraction_model)
 
             chunks = build_chunks(path, text=text, document_id=document_id)
             get_retriever().add_documents(chunks)
@@ -95,8 +105,33 @@ def process_document(db: Session, document: Document) -> None:
 
     except Exception as exc:  # noqa: BLE001 — surfaced on the Document row, not swallowed
         db.rollback()
+        _rollback_ml_writes(document.id)
         document.status = DocumentStatus.FAILED.value
         document.error_message = str(exc)
         db.add(document)
         db.commit()
         raise
+
+
+def _rollback_ml_writes(document_id) -> None:
+    """Undo whatever Chroma/Neo4j writes this document_id's ingestion already
+    made before it failed -- otherwise a Document row marked FAILED still
+    has its chunks/graph facts served by /api/search, /api/evidence/*,
+    /api/observations, and /api/timeline (found via review). Both deletes
+    are no-ops if nothing was written yet for this document_id (e.g. a
+    failure before the Chroma/graph-writing steps ever ran), so it's safe
+    to call unconditionally rather than tracking exactly how far the
+    pipeline got.
+    """
+    from ml.graph.deletion import delete_document_facts
+
+    document_id = str(document_id)
+    try:
+        get_retriever().delete_by_document_id(document_id)
+    except Exception as exc:  # noqa: BLE001 -- best-effort; don't mask the original failure
+        print(f"document_processor: failed to roll back Chroma chunks for {document_id}: {exc}")
+    try:
+        with new_graph_client() as client:
+            delete_document_facts(client, document_id)
+    except Exception as exc:  # noqa: BLE001 -- best-effort; don't mask the original failure
+        print(f"document_processor: failed to roll back graph facts for {document_id}: {exc}")

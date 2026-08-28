@@ -84,3 +84,32 @@ def test_add_documents_overwrites_existing_chunk_with_same_id(tmp_path):
     stored = retriever._collection.get(ids=["a"], include=["documents", "metadatas"])
     assert stored["documents"][0] == "ldl cholesterol levels rising"
     assert stored["metadatas"][0]["v"] == 2
+
+
+def test_delete_by_document_id_removes_only_that_documents_chunks(tmp_path):
+    retriever = build_retriever(tmp_path)
+    retriever.add_documents(
+        [
+            Chunk(id="patient_doc_doc1_0", text="ldl cholesterol levels rising", metadata={"document_id": "doc1"}),
+            Chunk(id="patient_doc_doc1_1", text="statin dosage changed", metadata={"document_id": "doc1"}),
+            Chunk(id="patient_doc_doc2_0", text="daily exercise routine", metadata={"document_id": "doc2"}),
+        ]
+    )
+
+    retriever.delete_by_document_id("doc1")
+
+    assert set(retriever._chunks) == {"patient_doc_doc2_0"}
+    remaining = retriever._collection.get(include=[])
+    assert remaining["ids"] == ["patient_doc_doc2_0"]
+    # BM25 index rebuilt without the deleted chunks, not just self._chunks
+    assert "patient_doc_doc1_0" not in retriever._bm25_ids
+    assert "patient_doc_doc1_1" not in retriever._bm25_ids
+
+
+def test_delete_by_document_id_is_a_noop_for_unknown_document(tmp_path):
+    retriever = build_retriever(tmp_path)
+    retriever.add_documents([Chunk(id="a", text="ldl cholesterol levels rising", metadata={"document_id": "doc1"})])
+
+    retriever.delete_by_document_id("never-ingested")
+
+    assert set(retriever._chunks) == {"a"}

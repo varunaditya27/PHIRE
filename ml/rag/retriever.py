@@ -125,6 +125,26 @@ class HybridRetriever:
             self._chunks[c.id] = c
         self._rebuild_bm25()
 
+    def delete_by_document_id(self, document_id: str) -> None:
+        """Remove every chunk tagged with this document_id from Chroma, the
+        in-memory chunk cache, and the BM25 index.
+
+        Compensating action for a failed ingestion (see
+        app/services/document_processor.py's rollback on failure) --
+        add_documents() tags every patient-document chunk with
+        metadata["document_id"] (ml/rag/ingest/ingest_patient_document.py's
+        build_chunks), so a where-filtered Chroma delete finds exactly the
+        chunks this document_id wrote, nothing from any other document or
+        reference source.
+        """
+        matching_ids = [cid for cid, chunk in self._chunks.items() if chunk.metadata.get("document_id") == document_id]
+        if not matching_ids:
+            return
+        self._collection.delete(ids=matching_ids)
+        for cid in matching_ids:
+            del self._chunks[cid]
+        self._rebuild_bm25()
+
     def _rebuild_bm25(self) -> None:
         """Recompute the BM25 index over all chunks seen so far.
 

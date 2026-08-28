@@ -40,6 +40,15 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         with GPU_LOCK:
             chain_response = get_qa_chain().answer(request.message)
     except Exception as exc:  # noqa: BLE001 -- surfaced to the caller, not swallowed
+        # Still records an assistant turn (error_message, no claims) so
+        # this exchange isn't an orphaned user question with no reply --
+        # the module docstring's "every exchange is persisted regardless
+        # of outcome" wasn't actually true for a pipeline failure before
+        # this (found via review): only the user message above had
+        # already been committed, and this except returned before ever
+        # writing an assistant ChatMessage.
+        db.add(ChatMessage(role="assistant", content=f"[error] ml pipeline failed: {exc}"))
+        db.commit()
         raise HTTPException(status_code=502, detail=f"ml pipeline failed: {exc}") from exc
 
     claims = [

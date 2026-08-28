@@ -9,32 +9,34 @@ helpers live in utils/encryption.py; the log sink lives in
 services/audit_logger.py.
 """
 
-from urllib.parse import urlparse
-
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
+
+from ml.local_only import require_localhost
 
 from app.database.connection import SessionLocal
 from app.services.audit_logger import log_access
 
 # Privacy boundary: every outbound network call this process makes must
-# target one of these hosts (local Ollama, local Postgres via SQLAlchemy —
-# not HTTP so not listed here). No cloud LLM/API hostnames are ever added.
-#
-# Same enforcement approach as ml/local_only.py's require_localhost():
-# parse the URI and check its hostname component, not the raw string.
-# A prior version here used str.startswith() on the raw host string,
-# which a hostname like "localhost.attacker.example" satisfies while
-# resolving to a genuinely remote host -- the exact bypass ml/local_only.py
-# was written to close.
-ALLOWED_OUTBOUND_HOSTNAMES = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+# resolve to localhost (local Ollama; local Postgres via SQLAlchemy isn't
+# HTTP so isn't covered here). Delegates to ml/local_only.py's
+# require_localhost() -- the same check ml.llm.ollama_client.OllamaClient
+# and ml.graph.client.GraphClient already enforce for their own calls --
+# instead of maintaining a second hand-written hostname allowlist here.
+# A prior version of this file reimplemented the check independently and
+# had already drifted from ml/'s canonical allowlist (an extra "0.0.0.0"
+# entry not present there); importing the one implementation means a
+# future fix to the shared logic can't fail to propagate here.
 
 
 def is_outbound_host_allowed(host: str) -> bool:
     """True iff host's actual hostname (not a substring match) is local."""
-    parsed_hostname = urlparse(host if "//" in host else f"//{host}").hostname
-    return parsed_hostname in ALLOWED_OUTBOUND_HOSTNAMES
+    try:
+        require_localhost(host if "//" in host else f"//{host}")
+        return True
+    except ValueError:
+        return False
 
 
 # Endpoints that touch patient data — audited on every request. Includes
@@ -72,5 +74,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
                         status_code=status_code,
                         client_host=request.client.host if request.client else None,
                     )
+                except Exception as exc:  # noqa: BLE001 -- a logging failure (e.g.
+                    # disk full) must not replace the real response/exception
+                    # this finally block is already propagating; best-effort
+                    # print so the failure is still visible somewhere.
+                    print(f"AuditMiddleware: failed to write audit log entry: {exc}")
                 finally:
                     db.close()

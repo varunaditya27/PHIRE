@@ -14,14 +14,18 @@ from fastapi import APIRouter
 
 from app.models.claim import Claim, ClaimExtractRequest, ClaimExtractResponse
 from app.utils.constants import EvidenceStatus
-from app.services.ml_singletons import get_claim_extractor
+from app.services.ml_singletons import GPU_LOCK, get_claim_extractor
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
 
 
 @router.post("/extract", response_model=ClaimExtractResponse)
 def extract_claims(request: ClaimExtractRequest) -> ClaimExtractResponse:
-    statements = get_claim_extractor().extract(request.text)
+    # GPU_LOCK: see ml_singletons.py's docstring -- get_claim_extractor()
+    # makes an Ollama call, same GPU-shared resource as chat generation
+    # and document ingestion.
+    with GPU_LOCK:
+        statements = get_claim_extractor().extract(request.text)
     # UNCERTAIN, not a real verdict: extraction alone doesn't verify a
     # claim against evidence -- see POST /api/evidence/verify for a status
     # that means something.
