@@ -2,28 +2,129 @@
 #
 # This is the file `docker-compose up -d` targets when run from the repo
 # root, per README.md and GET_STARTED.md's Quick Start. Dockerfiles it
-# will build from live in docker/ (Dockerfile.backend, Dockerfile.frontend).
+# builds from live in docker/ (Dockerfile.backend, Dockerfile.frontend).
 # See docker/docker-compose.yml for the same service list documented
 # alongside those Dockerfiles — keep both in sync until one is retired.
-#
-# Planned services:
-#   - postgres   : PostgreSQL — port 5432. Relational store for
-#                  observations, claims, timeline, and audit logs.
-#   - ollama     : local LLM inference — port 11434. Model configurable,
-#                  default medgemma:8b-q4_0 (~4GB), alternatives
-#                  qwen2:7b-instruct-q4_0 / meditron:7b-q4_0.
-#   - backend    : FastAPI app — port 8000 (build: docker/Dockerfile.backend,
-#                  context: ./backend). Reads backend/.env.
-#   - frontend   : Next.js app — port 3000 (build: docker/Dockerfile.frontend,
-#                  context: ./frontend). Reads frontend/.env.
-#   - nginx      : reverse proxy in front of frontend/backend (optional,
-#                  see docker/nginx.conf).
-#
-# Chroma is deliberately NOT a service here — it runs in-process from
-# Python (see ml/rag/retriever.py) as PHIRE's vector store for RAG; only
-# add a container for it if that changes.
 #
 # Privacy constraint: no service in this file may call out to external/
 # cloud APIs — all inference and storage must stay on the local network.
 #
-# Not yet implemented — placeholder only.
+# backend runs with network_mode: host, not compose's default bridge
+# network: ml.llm.ollama_client.OllamaClient and ml.graph.client.GraphClient
+# both call ml.local_only.require_localhost() on their configured host,
+# which only accepts a URI whose hostname is literally localhost/127.0.0.1/
+# ::1 -- a bridge-network service name like "ollama" or "neo4j" fails that
+# check even though the connection would otherwise work (see
+# ml/local_only.py's docstring for why: closing a real prefix-bypass
+# privacy hole, not a stray restriction to route around here). Host
+# networking makes every other container's *published* port reachable at
+# localhost from inside the backend container, which satisfies the check
+# without touching ml/'s code. Trade-off: host networking is Linux-native;
+# Docker Desktop (Mac/Windows) only added a beta opt-in for it in 4.29+ --
+# see backend_handoff.md's "Running with Docker" section for the current
+# per-platform status and the run-backend-locally fallback.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-phire}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-phire}
+      POSTGRES_DB: ${POSTGRES_DB:-phire}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-phire}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-phire-dev-password}
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      # Repo root, not ./backend -- Dockerfile.backend also installs
+      # ml/requirements.txt, which needs ml/ in the build context. See
+      # docker/Dockerfile.backend's header comment.
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    network_mode: host
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # localhost, not service names -- see this file's header comment.
+      # With network_mode: host, postgres/ollama/neo4j's published ports
+      # above are reachable at localhost from inside this container.
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-phire}:${POSTGRES_PASSWORD:-phire}@localhost:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-phire}
+      OLLAMA_HOST: http://localhost:${OLLAMA_PORT:-11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-medgemma:4b}
+      NEO4J_URI: bolt://localhost:${NEO4J_BOLT_PORT:-7687}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-phire-dev-password}
+      CHROMA_PERSIST_DIR: /data/chroma
+      UPLOAD_DIR: /data/documents
+    # network_mode: host bypasses compose's port publishing -- uvicorn
+    # binds 0.0.0.0:8000 inside the container (see
+    # docker/Dockerfile.backend's CMD), which host networking exposes
+    # directly as the host's port 8000. No `ports:` mapping needed/possible
+    # here -- BACKEND_PORT only still matters to frontend's
+    # NEXT_PUBLIC_API_URL below, and to the non-Docker (scripts/run_backend.sh)
+    # path where uvicorn does read it.
+    volumes:
+      - backend_data:/data
+      - ./ml:/app/ml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    env_file:
+      - path: ./frontend/.env
+        required: false
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  ollama_models:
+  neo4j_data:
+  backend_data:
