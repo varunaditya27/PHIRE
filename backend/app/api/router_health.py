@@ -1,11 +1,12 @@
 """
 POST /api/health — service liveness/readiness endpoint.
 
-Checks PostgreSQL, Ollama, Chroma (via ml/'s own retriever singleton),
-and Neo4j connectivity. Used by docker-compose healthchecks and the
-frontend's system-status indicator.
+Checks PostgreSQL, Ollama, Chroma (a direct client, not ml/'s retriever
+singleton -- see the vector_ok check below), and Neo4j connectivity. Used
+by docker-compose healthchecks and the frontend's system-status indicator.
 """
 
+import chromadb
 import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
@@ -14,7 +15,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database.connection import get_db
 from app.models.response import HealthStatus
-from app.services.ml_singletons import get_retriever, new_graph_client
+from app.security import is_outbound_host_allowed
+from app.services.ml_singletons import new_graph_client
 
 router = APIRouter(tags=["health"])
 
@@ -32,18 +34,29 @@ def health_check(db: Session = Depends(get_db)) -> HealthStatus:
         detail["database"] = str(exc)
 
     ollama_ok = True
-    try:
-        resp = httpx.get(f"{settings.ollama_host}/api/tags", timeout=3.0)
-        ollama_ok = resp.status_code == 200
-        if not ollama_ok:
-            detail["ollama"] = f"status {resp.status_code}"
-    except Exception as exc:  # noqa: BLE001
+    if not is_outbound_host_allowed(settings.ollama_host):
         ollama_ok = False
-        detail["ollama"] = str(exc)
+        detail["ollama"] = f"OLLAMA_HOST '{settings.ollama_host}' is not a local host -- refusing to call it"
+    else:
+        try:
+            resp = httpx.get(f"{settings.ollama_host}/api/tags", timeout=3.0)
+            ollama_ok = resp.status_code == 200
+            if not ollama_ok:
+                detail["ollama"] = f"status {resp.status_code}"
+        except Exception as exc:  # noqa: BLE001
+            ollama_ok = False
+            detail["ollama"] = str(exc)
 
+    # A direct chromadb client, not ml_singletons.get_retriever() -- the
+    # retriever's HybridRetriever construction eagerly loads the MedCPT
+    # embedding model into VRAM (see ml/rag/retriever.py), which a routine
+    # healthcheck shouldn't be triggering as a side effect (see
+    # document_processor.py's VRAM-ordering note on why unplanned model
+    # residency risks an OOM on an 8GB GPU).
     vector_ok = True
     try:
-        get_retriever()
+        client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
+        client.heartbeat()
     except Exception as exc:  # noqa: BLE001
         vector_ok = False
         detail["vector_store"] = str(exc)

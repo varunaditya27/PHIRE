@@ -1,6 +1,11 @@
-# Backend service image (FastAPI), standalone single-service build.
+# Backend service image (FastAPI), standalone single-service build --
+# ml/-free (no ml/requirements.txt, no ml/ source), for running backend/
+# on its own outside the full compose stack. Build context is backend/,
+# not the repo root:
+#   docker build -f docker/Dockerfile.backend.standalone -t phire-backend-standalone backend/
 # See docker/Dockerfile.backend for the compose-driven equivalent used by
-# docker/docker-compose.yml — keep the two in sync.
+# docker/docker-compose.yml (repo-root context, includes ml/'s deps) --
+# keep the two in sync where they overlap.
 
 FROM python:3.11-slim
 

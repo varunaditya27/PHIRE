@@ -16,6 +16,8 @@ there's nothing a UUID could look up.
 
 from fastapi import APIRouter
 
+from ml.claims.confidence import compute_confidence
+
 from app.models.claim import Claim
 from app.models.response import (
     EvidenceRetrieveRequest,
@@ -51,10 +53,20 @@ def verify_claim(request: EvidenceVerifyRequest) -> EvidenceVerifyResponse:
     if "char_start" in metadata and "char_end" in metadata:
         source_span = (metadata["char_start"], metadata["char_end"])
 
+    # Same confidence formula QAChain uses (ml/chains/qa_chain.py's
+    # _verify_claim) -- rank of the matched evidence chunk within this
+    # call's own retrieval, plus its authority, not just net entailment.
+    rank = next(
+        (i for i, c in enumerate(evidence) if verification.evidence and c.id == verification.evidence.id),
+        len(evidence),
+    )
+    authority = metadata.get("authority", 0.0)
+    confidence = compute_confidence(verification.entailment_prob, verification.contradiction_prob, rank, authority)
+
     claim = Claim(
         statement=verification.claim,
         status=verification.status,
-        confidence=max(verification.entailment_prob - verification.contradiction_prob, 0.0),
+        confidence=confidence,
         source_url=metadata.get("url"),
         source_filename=metadata.get("filename"),
         source_span=source_span,

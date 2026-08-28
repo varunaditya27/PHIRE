@@ -25,6 +25,8 @@ venv/
 
 # --- Ingested/generated data (regenerable via ml/rag/ingest/run_ingest.py) ---
 /data/
+# --- backend's runtime Chroma persistence + uploaded documents (settings.chroma_persist_dir / upload_dir) ---
+/backend/data/
 
 # --- OS / editor ---
 .DS_Store

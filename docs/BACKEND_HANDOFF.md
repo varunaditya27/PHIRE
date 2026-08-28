@@ -145,9 +145,9 @@ scripts/run_backend.sh     # alembic upgrade head + uvicorn --reload, PYTHONPATH
 **Docker (full stack):**
 ```bash
 cp .env.example .env && cp backend/.env.example backend/.env
-scripts/run.sh              # docker compose up -d --build (postgres, ollama, neo4j, backend, frontend)
-docker compose exec ollama ollama pull medgemma:4b
-docker compose exec ollama ollama pull qwen3.5:9b
+scripts/run.sh              # docker compose -f docker/docker-compose.yml up -d --build (postgres, ollama, neo4j, backend, frontend)
+docker compose -f docker/docker-compose.yml exec ollama ollama pull medgemma:4b
+docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen3.5:9b
 ```
 Note: `backend` runs with `network_mode: host` (see §5) — on Docker Desktop for Mac/Windows this needs the beta host-networking opt-in (Docker Desktop 4.29+, enabled in Settings → Resources → Network); on Linux it works natively. Without it, backend can't reach Ollama/Neo4j and every `ml/`-backed route will fail.
 

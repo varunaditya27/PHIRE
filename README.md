@@ -76,7 +76,7 @@ cp .env.example .env
 bash scripts/setup.sh
 
 # Start all services (Ollama, FastAPI, Next.js, PostgreSQL, Chroma)
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 
 # Check services running
 curl http://localhost:8000/health
@@ -134,6 +134,7 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Roles, work division, detailed task breakdown
 - **[GET_STARTED.md](GET_STARTED.md)** - First-day setup & onboarding checklist
 - **[ml/README.md](ml/README.md)** - `ml/` subsystem: architecture, quick start, model choices, feature status
+- **[backend/README.md](backend/README.md)** - `backend/` subsystem: API surface, architecture, configuration, quick start
 - **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap (MVP + extended, aligned to NLP-06)
 - **[docs/AGGRESSIVE_ROADMAP.md](docs/AGGRESSIVE_ROADMAP.md)** - Build checklist: core MVP + extended features
 - **[docs/OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md)** - 40+ open-source tools & integration guide

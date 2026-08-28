@@ -1,10 +1,10 @@
 # PHIRE service orchestration (local development).
 #
-# NOTE: the actual entrypoint used by `docker-compose up -d` (per
-# README.md / GET_STARTED.md, run from the repo root) is the root-level
-# ../docker-compose.yml. This file documents the same service list for
-# reference alongside the Dockerfiles that live in this directory — keep
-# the two in sync until one is retired.
+# This is the sole compose file (there used to be a near-duplicate at the
+# repo root; retired in favor of keeping everything docker-related under
+# docker/) -- run `docker compose -f docker/docker-compose.yml up -d` from
+# the repo root, or `docker compose up -d` from inside docker/. See
+# scripts/run.sh for the wrapper script.
 #
 # Privacy constraint: no service in this file may call out to external/
 # cloud APIs — all inference and storage must stay on the local network.

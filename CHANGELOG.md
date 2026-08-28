@@ -179,6 +179,70 @@ the first version of the Neo4j-backed graph layer.
   Docling — that were superseded by what was actually built but never
   updated in these docs)
 
+## [0.4.0] - 2026-08-28
+
+### `backend/`: wired to real `ml/` interfaces, full infrastructure
+
+Anika's backend landed in this session — FastAPI routers wired to `ml/`'s
+real classes (not stubs), PostgreSQL schema + Alembic migrations, Docker
+build/orchestration, and request-level audit logging.
+
+**Added**
+- All 8 routers (`chat`, `documents`, `observations`/`timeline`, `search`,
+  `evidence`, `claims`, `recommendations`, `health`) wired to `ml/`'s real
+  `QAChain`/`HybridRetriever`/`ClaimVerifier`/`OllamaClient`/`GraphClient`
+  via cached singletons (`app/services/ml_singletons.py`)
+- PostgreSQL schema + Alembic migrations for the single-patient data model
+- `AuditMiddleware` (`app/security.py`) — request-level audit trail for
+  every patient-data-facing endpoint
+- Docker build (`ml/` + `backend/` dependencies in one image) and compose
+  orchestration for the full stack (Postgres, Ollama, Neo4j, backend,
+  frontend)
+- `docs/BACKEND_HANDOFF.md` — integration log: what was retired, fixed,
+  tested, and known gaps
+
+**Fixed** (review pass before merge)
+- `AuditMiddleware` skipped logging entirely on an unhandled route
+  exception (e.g. Neo4j down) — now logs in a `finally`, so a failed
+  access to a HIPAA-audited endpoint still leaves an audit trail
+- `is_outbound_host_allowed()` (the no-cloud-calls enforcement function)
+  was defined but never called anywhere — wired into `/api/health`'s
+  Ollama probe, the one HTTP call backend itself makes
+- `/api/search` was missing from `_AUDITED_PREFIXES` despite being a GET
+  passthrough to the same evidence-retrieval call as the audited
+  `/api/evidence/retrieve`
+- Document upload buffered the entire file into memory before checking
+  the size cap, defeating it as a memory-exhaustion guard — now streamed
+  in chunks with the cap enforced as it reads
+- `POST /api/documents/{id}/process` had no guard against being triggered
+  twice concurrently, letting two calls race and duplicate ingestion work
+  — now rejects with `409` if already processing
+- `POST /api/evidence/verify` computed confidence with an ad-hoc formula
+  instead of `ml.claims.confidence.compute_confidence` (the formula
+  `/api/chat` actually uses), collapsing to exactly `0.0` on every
+  CONFLICTING verdict — now uses the shared formula
+- `/api/health` called `ml_singletons.get_retriever()` to test Chroma
+  connectivity, which as a side effect loads the MedCPT embedding model
+  into VRAM on first call — now uses a direct `chromadb` client instead,
+  so a routine healthcheck no longer risks pinning ~2-3GB of VRAM
+- `backend/data/` (a committed Chroma sqlite DB, HNSW index binaries, and
+  two sample PDFs — runtime/generated state) was checked into git —
+  removed and gitignored
+
+**Changed**
+- Consolidated the two near-duplicate `docker-compose.yml` files (root +
+  `docker/`) into one, `docker/docker-compose.yml` — the root copy is
+  retired. All Docker-related files now live under `docker/`: the
+  standalone backend build (`backend/Dockerfile` → `docker/Dockerfile.backend.standalone`)
+  and the root `.dockerignore` (→ `docker/Dockerfile.backend.dockerignore`,
+  picked up via BuildKit's per-Dockerfile ignore-file convention)
+
+**Docs**
+- `backend/README.md` added — `backend/` subsystem overview, API surface,
+  configuration, quick start (mirrors `ml/README.md`'s structure)
+- README.md, REPO_STRUCTURE.md updated for the `backend/README.md`
+  reference and the docker-compose.yml consolidation
+
 ---
 
 ## Future Versions

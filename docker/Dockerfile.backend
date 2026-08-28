@@ -1,8 +1,11 @@
 # Compose-driven build for the FastAPI backend service.
-# Referenced by both docker-compose.yml's `backend` service (build
-# context: repo root ".", dockerfile: docker/Dockerfile.backend). See
-# backend/Dockerfile for the standalone single-service equivalent
-# (ml/-free, kept separately) — keep the two in sync where they overlap.
+# Referenced by docker/docker-compose.yml's `backend` service (build
+# context: repo root "..", dockerfile: docker/Dockerfile.backend -- the
+# sole compose file; see its own header comment). See
+# docker/Dockerfile.backend.standalone for the standalone single-service
+# equivalent (ml/-free, kept separately) — keep the two in sync where
+# they overlap. Build-time file exclusions live alongside this file at
+# docker/Dockerfile.backend.dockerignore, not a repo-root .dockerignore.
 #
 # Build context is the repo root, not backend/ -- this image installs
 # ml/'s Python dependencies (torch, transformers, neo4j driver, etc, per
@@ -11,9 +14,9 @@
 # `import ml....` calls (see app/services/ml_singletons.py) actually
 # resolve inside the container instead of ImportError-ing. ml/'s *source*
 # still isn't baked into the image, though -- docker-compose mounts ../ml
-# read-only at /app/ml at runtime (see docker-compose.yml), so editing
-# ml/ locally doesn't require an image rebuild, only its dependency list
-# changing does.
+# read-only at /app/ml at runtime (see docker/docker-compose.yml), so
+# editing ml/ locally doesn't require an image rebuild, only its
+# dependency list changing does.
 
 FROM python:3.11-slim
 

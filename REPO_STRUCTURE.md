@@ -19,7 +19,8 @@ phire/
 │   ├── ML_HANDOFF_FOR_ANIKA.md     # ml/ -> backend/ integration contract
 │   └── RESEARCH_LOG.md             # Dated findings/decisions, reusable for paper drafting
 │
-├── backend/                         # ANIKA OWNS
+├── backend/                         # ANIKA OWNS — see backend/README.md
+│   ├── README.md                    # API surface, architecture, configuration, quick start
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                 # FastAPI app entry
@@ -202,8 +203,10 @@ phire/
 │
 ├── docker/
 │   ├── Dockerfile.backend
+│   ├── Dockerfile.backend.dockerignore
+│   ├── Dockerfile.backend.standalone  # ml/-free single-service build
 │   ├── Dockerfile.frontend
-│   ├── docker-compose.yml          # All services
+│   ├── docker-compose.yml          # All services — sole compose file
 │   └── nginx.conf                  # Reverse proxy (optional)
 │
 ├── scripts/
@@ -227,8 +230,7 @@ phire/
 │   └── COMPREHENSIVE_SYNTHESIS.md  # Extended reference (read-only)
 │
 ├── .env.example
-├── .gitignore
-└── docker-compose.yml              # Master orchestration file
+└── .gitignore
 ```
 
 ---
@@ -244,6 +246,7 @@ phire/
 - `ml/recommendations/` - Fitness and nutrition models (not yet implemented)
 
 ### Anika (Backend Infrastructure)
+- `backend/README.md` - Start here: API surface, architecture, configuration, quick start
 - `backend/` - FastAPI application, all server logic
 - `docker/` - All containerization
 - `scripts/` - Setup and run scripts

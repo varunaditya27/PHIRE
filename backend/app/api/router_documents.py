@@ -20,7 +20,7 @@ from app.database.schemas import Document
 from app.models.document import DocumentRead, DocumentUploadResponse
 from app.services.document_processor import process_document
 from app.utils.constants import SUPPORTED_FILE_TYPES, DocumentStatus
-from app.utils.validators import validate_upload, validate_upload_size
+from app.utils.validators import read_upload_within_limit, validate_upload
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -44,8 +44,7 @@ async def upload_document(
     db: Session = Depends(get_db),
 ) -> DocumentUploadResponse:
     validate_upload(file)
-    contents = await file.read()
-    validate_upload_size(len(contents))
+    contents = await read_upload_within_limit(file)
 
     settings = get_settings()
     upload_dir = Path(settings.upload_dir)
@@ -80,6 +79,15 @@ def reprocess_document(
     document = db.get(Document, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    if document.status == DocumentStatus.PROCESSING.value:
+        raise HTTPException(status_code=409, detail="Document is already being processed.")
+
+    # Flip status here, synchronously, rather than leaving it to
+    # process_document()'s own PROCESSING write -- that write doesn't
+    # happen until the background task actually runs, so two rapid calls
+    # would both pass the check above and both get scheduled.
+    document.status = DocumentStatus.PROCESSING.value
+    db.commit()
 
     background_tasks.add_task(_run_processing, document_id)
     return DocumentUploadResponse(id=document.id, filename=document.filename, status=DocumentStatus.PROCESSING)
