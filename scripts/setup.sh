@@ -8,7 +8,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 [ -f frontend/.env ] || [ ! -f frontend/.env.example ] || cp frontend/.env.example frontend/.env
 
 echo "==> Backend: Python venv + requirements"
-python3 -m venv backend/.venv
+if command -v python3.12 &>/dev/null; then
+  PYTHON_BIN="python3.12"
+elif command -v python3.11 &>/dev/null; then
+  PYTHON_BIN="python3.11"
+else
+  PYTHON_BIN="python3"
+fi
+$PYTHON_BIN -m venv backend/.venv
 backend/.venv/bin/pip install --upgrade pip -q
 backend/.venv/bin/pip install -q -r backend/requirements.txt
 

@@ -5,41 +5,21 @@
 # embeddings.py uses MedCPT directly via transformers/torch (dual encoder,
 # not a single Sentence-Transformers model); sentence-transformers is kept
 # for ml/rag/experiments' other benchmark candidates.
-sentence-transformers==5.7.0
-transformers==5.15.0
-torch==2.13.0        # CUDA build (+cu130) picked up automatically if a matching GPU/driver is present
-rank-bm25==0.2.2
-chromadb==1.5.9      # in-process vector store for RAG (PHIRE's default)
-numpy==2.5.2         # direct dep in ml/rag/experiments (ranking/scoring), also transitive via torch
-requests==2.34.2     # direct dep in ml/rag/ingest (PubMed/MedlinePlus/USDA APIs), also transitive via huggingface_hub
+sentence-transformers
+transformers
+torch
+rank-bm25
+chromadb
+numpy
+requests
 
 # --- Patient document ingestion ---
-pypdf==6.16.1        # text extraction from text-based PDF lab reports/records
-pillow==12.3.0        # image preprocessing for the OCR extractor + eval fixture generation
-                       # (ml/rag/ingest/experiments/eval_data/generate_images.py)
-rapidocr-onnxruntime==1.4.4  # cheap CPU-only OCR pre-pass, routes a PDF page to the
-                              # full olmOCR pass only when it disagrees with pypdf's
-                              # text layer — see ml/rag/ingest/router_experiments/RESULTS.md
+pypdf
+pillow
+rapidocr-onnxruntime
 
-# --- Graph RAG (longitudinal + relational retrieval, see
-#     docs/DATASETS_AND_GRAPH_RAG.md) ---
-neo4j==6.2.0          # driver for the Neo4j-backed Longitudinal Health Graph (ml/graph/)
-# lightrag-hku       # Multi-hop graph-RAG retrieval leg -- NOT YET IMPLEMENTED,
-                     # outstanding work (see docs/GRAPH_SCHEMA_ROADMAP.md
-                     # section 3f). Single-patient fact lookup/trend
-                     # computation (ml/graph/patient_context.py) is done;
-                     # entity/relationship traversal at query time is not.
-                     # Uncomment once that work actually starts -- whether
-                     # LightRAG itself is the right library for it is a
-                     # separate decision from whether this leg gets built.
-
-# --- Claim verification: implemented via facebook/bart-large-mnli
-#     (transformers, already pinned above) — see
-#     ml/claims/experiments/RESULTS.md for the model-selection benchmark.
-
-# --- ML frameworks (recommendations) ---
-# torch already pinned above (Embeddings / retrieval)
-# scikit-learn
+# --- Graph RAG ---
+neo4j
 
 # --- Testing ---
-pytest==9.1.1
+pytest
