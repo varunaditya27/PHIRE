@@ -12,14 +12,19 @@ phire/
 ├── docs/
 │   ├── FEATURES_ALIGNED.md         # Feature checklist (core + extended)
 │   ├── AGGRESSIVE_ROADMAP.md       # Build checklist: core MVP + extended features
+│   ├── BACKLOG.md                  # Known gaps, tech debt, open design questions
 │   ├── OPEN_SOURCE_TOOLS.md        # Tools catalog: adopted + evaluated-but-not-adopted candidates
 │   ├── DATASETS_AND_GRAPH_RAG.md   # Finalized datasets/models + graph RAG architecture
 │   ├── GRAPH_SCHEMA_ROADMAP.md     # Longitudinal Health Graph: current schema + deferred work
 │   ├── PDF_INGESTION_ROADMAP.md    # Scanned-PDF ingestion gap: decided design, not yet built
 │   ├── ML_HANDOFF_FOR_ANIKA.md     # ml/ -> backend/ integration contract
+│   ├── BACKEND_HANDOFF.md          # backend/ <-> ml/ integration log: what changed, fixed, tested
+│   ├── API_REFERENCE.md            # Full request/response reference for every backend endpoint
+│   ├── FRONTEND_HANDOFF.md         # Start here for frontend/ work
 │   └── RESEARCH_LOG.md             # Dated findings/decisions, reusable for paper drafting
 │
-├── backend/                         # ANIKA OWNS
+├── backend/                         # ANIKA OWNS — see backend/README.md
+│   ├── README.md                    # API surface, architecture, configuration, quick start
 │   ├── app/
 │   │   ├── __init__.py
 │   │   ├── main.py                 # FastAPI app entry
@@ -202,8 +207,10 @@ phire/
 │
 ├── docker/
 │   ├── Dockerfile.backend
+│   ├── Dockerfile.backend.dockerignore
+│   ├── Dockerfile.backend.standalone  # ml/-free single-service build
 │   ├── Dockerfile.frontend
-│   ├── docker-compose.yml          # All services
+│   ├── docker-compose.yml          # All services — sole compose file
 │   └── nginx.conf                  # Reverse proxy (optional)
 │
 ├── scripts/
@@ -227,8 +234,7 @@ phire/
 │   └── COMPREHENSIVE_SYNTHESIS.md  # Extended reference (read-only)
 │
 ├── .env.example
-├── .gitignore
-└── docker-compose.yml              # Master orchestration file
+└── .gitignore
 ```
 
 ---
@@ -244,11 +250,14 @@ phire/
 - `ml/recommendations/` - Fitness and nutrition models (not yet implemented)
 
 ### Anika (Backend Infrastructure)
+- `backend/README.md` - Start here: API surface, architecture, configuration, quick start
 - `backend/` - FastAPI application, all server logic
 - `docker/` - All containerization
 - `scripts/` - Setup and run scripts
 
 ### Shashwati (Frontend & Evaluation)
+- `docs/FRONTEND_HANDOFF.md` - Start here: what's built in backend/ml, how to run the stack, gotchas
+- `docs/API_REFERENCE.md` - Full request/response reference for every endpoint
 - `frontend/` - Next.js application, UI components
 - `evaluation/` - All metrics and benchmarking
 - `evaluation/results/` - Metrics output, figures for paper

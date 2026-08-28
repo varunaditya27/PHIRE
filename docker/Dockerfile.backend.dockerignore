@@ -1,0 +1,26 @@
+# Backend's Docker build context is the repo root (see
+# docker/Dockerfile.backend's header comment for why), but this file lives
+# here in docker/ rather than at the repo root -- BuildKit looks for a
+# <dockerfile-name>.dockerignore next to the Dockerfile it's building and
+# uses that instead of a root-level .dockerignore when present (Docker
+# 19.03+/BuildKit; docker/docker-compose.yml builds with BuildKit by
+# default). Patterns below are still evaluated relative to the build
+# context root (the repo root), not this directory. Without this file,
+# the build would ship .git, every package's venv, node_modules, and local
+# runtime data into the build context on every build.
+
+.git
+**/.venv
+**/venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+data/
+backend/data/
+ml/data/
+frontend/.next
+frontend/out
+*.log
+.env
+**/.env
+!**/.env.example

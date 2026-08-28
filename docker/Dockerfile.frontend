@@ -2,7 +2,25 @@
 # Referenced by docker/docker-compose.yml's `frontend` service (build
 # context: ../frontend, dockerfile: docker/Dockerfile.frontend).
 #
-# Planned: multi-stage build (deps -> build -> run), served via `next start`
-# on port 3000. Server components keep PHI server-side per README.md.
-#
-# Not yet implemented — placeholder only.
+# Generic containerization only — app code/structure under frontend/ is
+# Shashwati's; this file lives in docker/ per REPO_STRUCTURE.md's
+# ownership split (docker/ is Anika's).
+
+FROM node:20-slim AS builder
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-slim
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 3000
+
+CMD ["npm", "start"]

@@ -8,7 +8,7 @@ PHIRE helps users understand their personal health data through an AI assistant 
 - Reasons over years of health history (detects trends, patterns, contradictions)
 - Detects when it's uncertain and abstains (prevents false health information)
 
-**Status**: Core ML pipeline (RAG, claim verification, Longitudinal Health Graph) implemented and live-tested; backend/frontend integration and extended features in progress. See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the current checklist.
+**Status**: Core ML pipeline (RAG, claim verification, Longitudinal Health Graph) and `backend` are implemented, wired together, and live-tested end-to-end; `frontend` and extended features are in progress. See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the current checklist and [docs/BACKLOG.md](docs/BACKLOG.md) for known gaps.
 
 ---
 
@@ -76,7 +76,7 @@ cp .env.example .env
 bash scripts/setup.sh
 
 # Start all services (Ollama, FastAPI, Next.js, PostgreSQL, Chroma)
-docker-compose up -d
+docker compose -f docker/docker-compose.yml up -d
 
 # Check services running
 curl http://localhost:8000/health
@@ -134,8 +134,12 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Roles, work division, detailed task breakdown
 - **[GET_STARTED.md](GET_STARTED.md)** - First-day setup & onboarding checklist
 - **[ml/README.md](ml/README.md)** - `ml/` subsystem: architecture, quick start, model choices, feature status
+- **[backend/README.md](backend/README.md)** - `backend/` subsystem: API surface, architecture, configuration, quick start
+- **[docs/API_REFERENCE.md](docs/API_REFERENCE.md)** - Full request/response reference for every backend endpoint
+- **[docs/FRONTEND_HANDOFF.md](docs/FRONTEND_HANDOFF.md)** - Start here for `frontend/` work: what's built, how to run the stack, gotchas
 - **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap (MVP + extended, aligned to NLP-06)
 - **[docs/AGGRESSIVE_ROADMAP.md](docs/AGGRESSIVE_ROADMAP.md)** - Build checklist: core MVP + extended features
+- **[docs/BACKLOG.md](docs/BACKLOG.md)** - Known gaps, tech debt, and open design questions across ml/backend/frontend
 - **[docs/OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md)** - 40+ open-source tools & integration guide
 - **[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md)** - Finalized fitness/nutrition datasets, model choices, and the hybrid vector + graph RAG architecture
 - **[REPO_STRUCTURE.md](REPO_STRUCTURE.md)** - Repository layout & folder ownership

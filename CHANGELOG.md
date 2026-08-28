@@ -179,6 +179,191 @@ the first version of the Neo4j-backed graph layer.
   Docling — that were superseded by what was actually built but never
   updated in these docs)
 
+## [0.4.0] - 2026-08-28
+
+### `backend/`: wired to real `ml/` interfaces, full infrastructure
+
+Anika's backend landed in this session — FastAPI routers wired to `ml/`'s
+real classes (not stubs), PostgreSQL schema + Alembic migrations, Docker
+build/orchestration, and request-level audit logging.
+
+**Added**
+- All 8 routers (`chat`, `documents`, `observations`/`timeline`, `search`,
+  `evidence`, `claims`, `recommendations`, `health`) wired to `ml/`'s real
+  `QAChain`/`HybridRetriever`/`ClaimVerifier`/`OllamaClient`/`GraphClient`
+  via cached singletons (`app/services/ml_singletons.py`)
+- PostgreSQL schema + Alembic migrations for the single-patient data model
+- `AuditMiddleware` (`app/security.py`) — request-level audit trail for
+  every patient-data-facing endpoint
+- Docker build (`ml/` + `backend/` dependencies in one image) and compose
+  orchestration for the full stack (Postgres, Ollama, Neo4j, backend,
+  frontend)
+- `docs/BACKEND_HANDOFF.md` — integration log: what was retired, fixed,
+  tested, and known gaps
+
+**Fixed** (review pass before merge)
+- `AuditMiddleware` skipped logging entirely on an unhandled route
+  exception (e.g. Neo4j down) — now logs in a `finally`, so a failed
+  access to a HIPAA-audited endpoint still leaves an audit trail
+- `is_outbound_host_allowed()` (the no-cloud-calls enforcement function)
+  was defined but never called anywhere — wired into `/api/health`'s
+  Ollama probe, the one HTTP call backend itself makes
+- `/api/search` was missing from `_AUDITED_PREFIXES` despite being a GET
+  passthrough to the same evidence-retrieval call as the audited
+  `/api/evidence/retrieve`
+- Document upload buffered the entire file into memory before checking
+  the size cap, defeating it as a memory-exhaustion guard — now streamed
+  in chunks with the cap enforced as it reads
+- `POST /api/documents/{id}/process` had no guard against being triggered
+  twice concurrently, letting two calls race and duplicate ingestion work
+  — now rejects with `409` if already processing
+- `POST /api/evidence/verify` computed confidence with an ad-hoc formula
+  instead of `ml.claims.confidence.compute_confidence` (the formula
+  `/api/chat` actually uses), collapsing to exactly `0.0` on every
+  CONFLICTING verdict — now uses the shared formula
+- `/api/health` called `ml_singletons.get_retriever()` to test Chroma
+  connectivity, which as a side effect loads the MedCPT embedding model
+  into VRAM on first call — now uses a direct `chromadb` client instead,
+  so a routine healthcheck no longer risks pinning ~2-3GB of VRAM
+- `backend/data/` (a committed Chroma sqlite DB, HNSW index binaries, and
+  two sample PDFs — runtime/generated state) was checked into git —
+  removed and gitignored
+
+**Fixed** (second pass — the three items `docs/BACKEND_HANDOFF.md` §6
+had flagged as known gaps, plus one more found while checking CORS)
+- VRAM ordering risk: chat generation and document ingestion could run
+  concurrently and OOM an 8GB GPU (each independently loads/uses
+  VRAM-resident models) — added `ml_singletons.GPU_LOCK`, held by both
+  `router_chat.py`'s chat generation and `document_processor.py`'s
+  ingestion pipeline, so they now serialize instead of racing
+- `nginx` proxy profile targeted the bridge-network service name
+  `backend:8000`, unreachable from a host-networked `backend` — `nginx`
+  now runs `network_mode: host` too, targeting `localhost`
+- `claims` Postgres table was defined (with a migration) but nothing
+  wrote to it — `router_chat.py` now inserts a `Claim` row per claim
+  alongside the existing `chat_messages.claims` JSON snapshot
+- `backend/.env.example`'s `CHROMA_PERSIST_DIR=./data/chroma` reintroduced
+  the cwd-relative-path bug `docs/BACKEND_HANDOFF.md` §5 says was already
+  fixed once — `scripts/run_backend.sh` `cd`s into `backend/` before
+  launching, so copying the example verbatim silently diverges from
+  `ml/`'s own repo-root-relative default. Left unset in the example so
+  `config.py`'s correct default applies
+
+**Changed**
+- Consolidated the two near-duplicate `docker-compose.yml` files (root +
+  `docker/`) into one, `docker/docker-compose.yml` — the root copy is
+  retired. All Docker-related files now live under `docker/`: the
+  standalone backend build (`backend/Dockerfile` → `docker/Dockerfile.backend.standalone`)
+  and the root `.dockerignore` (→ `docker/Dockerfile.backend.dockerignore`,
+  picked up via BuildKit's per-Dockerfile ignore-file convention)
+
+**Docs**
+- `backend/README.md` added — `backend/` subsystem overview, API surface,
+  configuration, quick start (mirrors `ml/README.md`'s structure)
+- README.md, REPO_STRUCTURE.md updated for the `backend/README.md`
+  reference and the docker-compose.yml consolidation
+
+## [0.5.0] - 2026-08-28
+
+### Final review pass across `backend/` + `ml/` before frontend work begins, plus frontend docs
+
+A full-codebase review (not diff-scoped) of `backend/` and `ml/` together,
+run as the gate before `frontend/` work starts. Several of its findings
+were regressions in fixes from this same review cycle (`[0.4.0]`) — noted
+below.
+
+**Fixed**
+- `ml/chains/qa_chain.py`'s `_verify_claim` (and `router_evidence.py`'s
+  copy of the same formula) used `next(..., len(evidence))` as a
+  rank-not-found fallback, which collides with a genuine rank of 0 when
+  the verification pool is empty — a claim with **no** matched evidence
+  got `compute_confidence`'s retrieval-only floor (0.25) instead of
+  `0.0`. Both now special-case "no evidence" to `confidence = 0.0`
+  directly
+- `QAChain.answer()` had no error handling around its Neo4j graph calls,
+  so any Neo4j outage 502'd every `/api/chat` request — including
+  general questions that never needed patient-graph facts, contrary to
+  CLAUDE.md describing the graph layer as not MVP-blocking. Graph facts
+  now default to empty (with a logged warning) instead of failing the
+  request when Neo4j is unreachable
+- `document_processor.py` never rolled back Chroma chunks / Neo4j facts
+  a failed ingestion had already written before the failure — a document
+  shown as `failed` could still have its data served by `/api/search`,
+  `/api/evidence/*`, `/api/observations`, and `/api/timeline`. Added
+  `HybridRetriever.delete_by_document_id` and `ml/graph/deletion.py`,
+  called from the failure path
+- `GPU_LOCK` (added in `[0.4.0]` for chat + ingestion) didn't cover
+  `router_evidence.py`'s `/retrieve` + `/verify`, `router_search.py`'s
+  `/evidence`, or `router_claims.py`'s `/extract`, even though all three
+  call the same GPU-resident singletons — now held by all of them
+- `AuditMiddleware`'s `finally` block (added in `[0.4.0]` to log on
+  unhandled route exceptions) called `log_access()` with no try/except
+  of its own — a logging failure (e.g. disk full) replaced the real
+  response with an unhandled 500 for every audited-endpoint request.
+  Now caught and logged best-effort instead
+- `backend/app/security.py` reimplemented `ml/local_only.py`'s
+  `require_localhost` as a second hand-written allowlist that had
+  already drifted (an extra `"0.0.0.0"` entry absent from `ml/`'s
+  canonical set) — now delegates to the shared `ml/` implementation
+  directly
+- `POST /api/documents/{id}/process`'s concurrency guard (added in
+  `[0.4.0]`) was a read-then-write check, not atomic across two
+  concurrent HTTP requests/sessions — replaced with a single conditional
+  `UPDATE ... WHERE status != 'processing'`, atomic via Postgres row
+  locking
+- `POST /api/documents/upload` was `async def` but ran blocking disk
+  I/O (`mkdir`, `write_bytes`) and a DB commit directly on the event
+  loop — offloaded to a threadpool via `run_in_threadpool` so a large
+  upload can't stall other concurrent requests
+- A failed `/api/chat` pipeline call left the user's already-committed
+  `ChatMessage` with no paired assistant reply, contradicting the
+  module's own "every exchange is persisted regardless of outcome"
+  docstring — now writes an error-marker assistant message on failure
+- `backend/.env`'s `PROSE_EXTRACTION_MODEL` was silently ignored —
+  `document_processor.py` now threads it through to `extract_facts()`
+  instead of relying on that function's own default (`OCR_MODEL` is a
+  separate, not-yet-fixed gap — see `docs/BACKEND_HANDOFF.md` §6)
+
+**Tests**
+- `ml/tests/test_qa_chain.py`: added coverage for the zero-evidence
+  confidence fix and Neo4j-unreachable graceful degradation; fixed an
+  existing test (`test_verified_claim_has_no_source_span_when_evidence_lacks_offsets`)
+  whose mock evidence chunk was never actually part of the pool passed
+  to `verify()` — it only passed before this fix because of the very
+  rank-collision bug being fixed
+- `ml/tests/test_retriever.py`: added coverage for
+  `delete_by_document_id` (removes only the target document's chunks,
+  rebuilds BM25, no-ops for an unknown document_id)
+
+**Docs**
+- `docs/API_REFERENCE.md` added — full request/response reference for
+  every backend endpoint, generated from the actual routers/Pydantic
+  models
+- `docs/FRONTEND_HANDOFF.md` added — start-here doc for `frontend/`
+  work: how to run the stack, what's built, gotchas (no streaming,
+  inconsistent id types, GPU-shared backend, etc.)
+- README.md, REPO_STRUCTURE.md updated with links to both
+
+## [0.5.1] - 2026-08-28
+
+### Engineering backlog doc + documentation audit
+
+**Docs**
+- `docs/BACKLOG.md` added — consolidates known gaps, tech debt, and open
+  design questions across `ml/`, `backend/`, and `frontend/` (surfaced
+  through the `[0.4.0]`–`[0.5.0]` review passes plus what was already
+  tracked in `docs/BACKEND_HANDOFF.md` §6) into one place, distinct from
+  `docs/AGGRESSIVE_ROADMAP.md`'s feature checklist
+- `docs/AGGRESSIVE_ROADMAP.md`'s Core Build Checklist updated — several
+  items (`PostgreSQL`, `FastAPI scaffold`, backend retrieval/chat
+  endpoints, HIPAA audit trails, README+deployment docs) were still
+  unchecked despite being done as of `[0.4.0]`/`[0.5.0]`
+- `README.md`, `REPO_STRUCTURE.md` updated: `docs/BACKLOG.md` linked;
+  `REPO_STRUCTURE.md`'s `docs/` tree was also missing
+  `docs/BACKEND_HANDOFF.md`, `docs/API_REFERENCE.md`, and
+  `docs/FRONTEND_HANDOFF.md` (all added in `[0.4.0]`/`[0.5.0]` but never
+  added to the tree listing) — added
+
 ---
 
 ## Future Versions

@@ -1,6 +1,43 @@
 # Compose-driven build for the FastAPI backend service.
-# Referenced by docker/docker-compose.yml's `backend` service (build context:
-# ../backend, dockerfile: docker/Dockerfile.backend). See backend/Dockerfile
-# for the standalone single-service equivalent — keep the two in sync.
+# Referenced by docker/docker-compose.yml's `backend` service (build
+# context: repo root "..", dockerfile: docker/Dockerfile.backend -- the
+# sole compose file; see its own header comment). See
+# docker/Dockerfile.backend.standalone for the standalone single-service
+# equivalent (ml/-free, kept separately) — keep the two in sync where
+# they overlap. Build-time file exclusions live alongside this file at
+# docker/Dockerfile.backend.dockerignore, not a repo-root .dockerignore.
 #
-# Not yet implemented — placeholder only.
+# Build context is the repo root, not backend/ -- this image installs
+# ml/'s Python dependencies (torch, transformers, neo4j driver, etc, per
+# ml/requirements.txt) alongside backend's own, so router_chat.py /
+# router_claims.py / router_evidence.py / router_search.py's real
+# `import ml....` calls (see app/services/ml_singletons.py) actually
+# resolve inside the container instead of ImportError-ing. ml/'s *source*
+# still isn't baked into the image, though -- docker-compose mounts ../ml
+# read-only at /app/ml at runtime (see docker/docker-compose.yml), so
+# editing ml/ locally doesn't require an image rebuild, only its
+# dependency list changing does.
+
+FROM python:3.11-slim
+
+# libpq-dev + build-essential for psycopg2 and any ml/ deps needing a
+# native build. Neither backend nor ml/'s OCR path (olmOCR via Ollama,
+# rapidocr-onnxruntime) needs the system tesseract-ocr binary -- verified
+# against ml/requirements.txt and ml/rag/ingest/ocr.py.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY backend/requirements.txt ./backend-requirements.txt
+COPY ml/requirements.txt ./ml-requirements.txt
+RUN pip install --no-cache-dir -r backend-requirements.txt -r ml-requirements.txt
+
+COPY backend/app/ ./app
+COPY backend/alembic.ini .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
