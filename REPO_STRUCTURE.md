@@ -12,11 +12,15 @@ phire/
 ├── docs/
 │   ├── FEATURES_ALIGNED.md         # Feature checklist (core + extended)
 │   ├── AGGRESSIVE_ROADMAP.md       # Build checklist: core MVP + extended features
+│   ├── BACKLOG.md                  # Known gaps, tech debt, open design questions
 │   ├── OPEN_SOURCE_TOOLS.md        # Tools catalog: adopted + evaluated-but-not-adopted candidates
 │   ├── DATASETS_AND_GRAPH_RAG.md   # Finalized datasets/models + graph RAG architecture
 │   ├── GRAPH_SCHEMA_ROADMAP.md     # Longitudinal Health Graph: current schema + deferred work
 │   ├── PDF_INGESTION_ROADMAP.md    # Scanned-PDF ingestion gap: decided design, not yet built
 │   ├── ML_HANDOFF_FOR_ANIKA.md     # ml/ -> backend/ integration contract
+│   ├── BACKEND_HANDOFF.md          # backend/ <-> ml/ integration log: what changed, fixed, tested
+│   ├── API_REFERENCE.md            # Full request/response reference for every backend endpoint
+│   ├── FRONTEND_HANDOFF.md         # Start here for frontend/ work
 │   └── RESEARCH_LOG.md             # Dated findings/decisions, reusable for paper drafting
 │
 ├── backend/                         # ANIKA OWNS — see backend/README.md

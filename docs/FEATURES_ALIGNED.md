@@ -28,7 +28,7 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - Ollama + medgemma:4b (MedGemma ships only as 4B/27B, not "1.5"/"8B")
 - Conversational query interface
 - Real-time streaming responses
-- **Status**: ✅ ML pipeline done (`ml/chains/qa_chain.py`); streaming + backend/frontend wiring not yet built
+- **Status**: ✅ ML pipeline done (`ml/chains/qa_chain.py`) and wired through `backend`'s `POST /api/chat` (`docs/API_REFERENCE.md`), live-tested end-to-end; no token streaming (single blocking response — see that endpoint's docs) and frontend not yet built
 
 **2. Personalized Wellness Guidance** (NLP-06 §1, Objectives)
 - Nutrition recommendations (LLM-powered)
@@ -381,6 +381,6 @@ Computer vision features (10-15) extend NLP-06 scope with novel research angles 
 
 ---
 
-**Prepared**: August 2026, updated 2026-08-26
-**Status**: Tier 1 core ML pipeline (features 1, 3, 4, 7, 8, 9, part of 18) implemented and live-tested — see [ml/README.md](../ml/README.md) for details. Backend/frontend integration, recommendations (feature 2), Tier 2 CV extensions, and multi-hop graph retrieval are not yet built.
-**Next Step**: See `ml/README.md`'s Features & Status for `ml/`-specific next steps; CONTRIBUTING.md for cross-team work division
+**Prepared**: August 2026, updated 2026-08-28
+**Status**: Tier 1 core ML pipeline (features 1, 3, 4, 7, 8, 9, part of 18) implemented and live-tested — see [ml/README.md](../ml/README.md) for details. `backend/` is now wired to it end-to-end (see [backend/README.md](../backend/README.md), [docs/API_REFERENCE.md](API_REFERENCE.md)); `frontend/` integration, recommendations (feature 2), Tier 2 CV extensions, and multi-hop graph retrieval are not yet built — see [docs/BACKLOG.md](BACKLOG.md) for the current open-items list.
+**Next Step**: See [docs/FRONTEND_HANDOFF.md](FRONTEND_HANDOFF.md) to start `frontend/` work; `ml/README.md`'s Features & Status for `ml/`-specific next steps; CONTRIBUTING.md for cross-team work division

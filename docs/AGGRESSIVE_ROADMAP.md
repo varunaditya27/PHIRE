@@ -14,20 +14,20 @@ below reflect actual build status, not a schedule or a time budget.
 
 ### Infrastructure Bootstrap
 - [x] Ollama + medgemma:4b (chat), qwen3.5:9b (prose extraction) → localhost:11434
-- [ ] PostgreSQL (Docker) — Chroma is the vector store, not pgvector
+- [x] PostgreSQL (Docker) — Chroma is the vector store, not pgvector
 - [x] Chroma vector DB (native Python, in-process)
 - [x] Neo4j (Docker/podman) — Longitudinal Health Graph
-- [ ] FastAPI scaffold with async routing
-- [ ] Next.js 15 setup with server components (keeps PHI server-side)
-- **Deliverable**: All services running, basic API endpoints — ml/-side services (Ollama, Chroma, Neo4j) ready; backend/frontend scaffolding not yet built
+- [x] FastAPI scaffold with async routing — all 8 routers wired to real `ml/` interfaces, not stubs (`backend/README.md`)
+- [ ] Next.js 15 setup with server components (keeps PHI server-side) — repo scaffolded (`create-next-app`), no app code written yet
+- **Deliverable**: All services running, basic API endpoints — ✅ true for `ml/` + `backend/` (live-tested end-to-end, see `docs/BACKEND_HANDOFF.md`); frontend scaffolding exists but is unmodified boilerplate
 
 ### Document Pipeline + RAG Core
 - [x] PDF/OCR extraction (pypdf + olmOCR-v2, not Docling) → normalized observations
 - [x] Chroma ingestion pipeline (embed clinical reference docs — PubMed, MedlinePlus, USDA)
 - [x] BM25 lexical retrieval (exact term matching for lab values)
 - [x] Hand-written RAG chain with Ollama (`ml/chains/qa_chain.py`) — LangChain evaluated, not adopted
-- [ ] Backend retrieval endpoint: `/api/evidence/retrieve`
-- **Deliverable**: Query "LDL" → returns relevant evidence — ✅ done at the `ml/` level (`HybridRetriever.retrieve`), not yet exposed via a backend endpoint
+- [x] Backend retrieval endpoint: `/api/evidence/retrieve` (`GET /api/search/evidence` too — see `docs/API_REFERENCE.md`)
+- **Deliverable**: Query "LDL" → returns relevant evidence — ✅ done and exposed via backend (`docs/API_REFERENCE.md`'s Evidence & Claims section)
 
 ### Claim Extraction + Verification
 - [x] LLM prompt for structured claim extraction (atomic facts)
@@ -35,7 +35,7 @@ below reflect actual build status, not a schedule or a time budget.
 - [x] Confidence scoring (status taxonomy: SUPPORTED, DERIVED, CONFLICTING, UNCERTAIN, UNSUPPORTED — not INFERRED, no validated signal for it yet)
 - [x] Entailment checking (does evidence support claim?)
 - [ ] UI: Chat interface + clickable evidence highlights
-- **Deliverable**: `/api/chat` returns claims with evidence links — ✅ done as a direct `QAChain.answer()` call; not yet exposed via a backend endpoint or rendered in a UI
+- **Deliverable**: `/api/chat` returns claims with evidence links — ✅ done and exposed via `POST /api/chat` (`docs/API_REFERENCE.md`); not yet rendered in a UI
 
 ### Longitudinal Reasoning
 - [x] Health timeline construction (Observations grouped by date, Neo4j)
@@ -54,18 +54,18 @@ below reflect actual build status, not a schedule or a time budget.
 - **Deliverable**: System gives fitness advice + halts on unsupported health claims — hallucination detection ✅ done and live-tested; fitness advice ❌ not started
 
 ### Integration + Polish
-- [ ] Connect all subsystems (frontend ↔ backend ↔ RAG ↔ LLM ↔ HAR) — `ml/` pieces connect to each other (`QAChain`); backend/frontend wiring not started
-- [ ] Error handling, logging, HIPAA audit trails (backend scope)
+- [ ] Connect all subsystems (frontend ↔ backend ↔ RAG ↔ LLM ↔ HAR) — `backend` ↔ `ml/` wired and live-tested (`docs/BACKEND_HANDOFF.md`); `frontend` ↔ `backend` not started (see `docs/FRONTEND_HANDOFF.md`)
+- [x] Error handling, logging, HIPAA audit trails (backend scope) — `AuditMiddleware` (`backend/app/security.py`), per-request audit log
 - [ ] Caching layer (reduce LLM inference latency)
 - [x] Privacy audit within `ml/` — every Ollama/Neo4j call enforces local-only at the code level (`ml/local_only.py`), not just convention
-- **Deliverable**: Complete end-to-end system working — ✅ true for `ml/` in isolation (live-tested pipeline, including concurrent load); not yet true end-to-end through a UI
+- **Deliverable**: Complete end-to-end system working — ✅ true for `ml/` + `backend/` together (live-tested, including a full review pass — see `CHANGELOG.md`'s `[0.5.0]`); not yet true end-to-end through a UI. See `docs/BACKLOG.md` for what's still open in ml/backend before that.
 
 ### Evaluation + Documentation
 - [ ] ArchEHR-QA 2026 evaluation (167 expert cases) — not started (Shashwati's scope)
 - [ ] Baseline metrics: evidence attribution precision/recall, claim extraction quality, hallucination rate, response latency
 - [x] Live end-to-end pipeline testing (`ml/tests/test_qa_chain_live_e2e.py`, real Ollama/Neo4j/Chroma, no mocks)
 - [ ] Demo personas + end-to-end workflow testing through a UI
-- [ ] README + deployment guide (backend/frontend scope; `ml/README.md` done)
+- [x] README + deployment guide — `ml/README.md`, `backend/README.md` done; frontend's still pending its own build
 - [ ] CI/CD setup
 
 ---

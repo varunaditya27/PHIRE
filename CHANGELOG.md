@@ -344,6 +344,26 @@ below.
   inconsistent id types, GPU-shared backend, etc.)
 - README.md, REPO_STRUCTURE.md updated with links to both
 
+## [0.5.1] - 2026-08-28
+
+### Engineering backlog doc + documentation audit
+
+**Docs**
+- `docs/BACKLOG.md` added — consolidates known gaps, tech debt, and open
+  design questions across `ml/`, `backend/`, and `frontend/` (surfaced
+  through the `[0.4.0]`–`[0.5.0]` review passes plus what was already
+  tracked in `docs/BACKEND_HANDOFF.md` §6) into one place, distinct from
+  `docs/AGGRESSIVE_ROADMAP.md`'s feature checklist
+- `docs/AGGRESSIVE_ROADMAP.md`'s Core Build Checklist updated — several
+  items (`PostgreSQL`, `FastAPI scaffold`, backend retrieval/chat
+  endpoints, HIPAA audit trails, README+deployment docs) were still
+  unchecked despite being done as of `[0.4.0]`/`[0.5.0]`
+- `README.md`, `REPO_STRUCTURE.md` updated: `docs/BACKLOG.md` linked;
+  `REPO_STRUCTURE.md`'s `docs/` tree was also missing
+  `docs/BACKEND_HANDOFF.md`, `docs/API_REFERENCE.md`, and
+  `docs/FRONTEND_HANDOFF.md` (all added in `[0.4.0]`/`[0.5.0]` but never
+  added to the tree listing) — added
+
 ---
 
 ## Future Versions
