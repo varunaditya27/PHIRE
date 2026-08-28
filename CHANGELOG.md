@@ -229,6 +229,26 @@ build/orchestration, and request-level audit logging.
   two sample PDFs — runtime/generated state) was checked into git —
   removed and gitignored
 
+**Fixed** (second pass — the three items `docs/BACKEND_HANDOFF.md` §6
+had flagged as known gaps, plus one more found while checking CORS)
+- VRAM ordering risk: chat generation and document ingestion could run
+  concurrently and OOM an 8GB GPU (each independently loads/uses
+  VRAM-resident models) — added `ml_singletons.GPU_LOCK`, held by both
+  `router_chat.py`'s chat generation and `document_processor.py`'s
+  ingestion pipeline, so they now serialize instead of racing
+- `nginx` proxy profile targeted the bridge-network service name
+  `backend:8000`, unreachable from a host-networked `backend` — `nginx`
+  now runs `network_mode: host` too, targeting `localhost`
+- `claims` Postgres table was defined (with a migration) but nothing
+  wrote to it — `router_chat.py` now inserts a `Claim` row per claim
+  alongside the existing `chat_messages.claims` JSON snapshot
+- `backend/.env.example`'s `CHROMA_PERSIST_DIR=./data/chroma` reintroduced
+  the cwd-relative-path bug `docs/BACKEND_HANDOFF.md` §5 says was already
+  fixed once — `scripts/run_backend.sh` `cd`s into `backend/` before
+  launching, so copying the example verbatim silently diverges from
+  `ml/`'s own repo-root-relative default. Left unset in the example so
+  `config.py`'s correct default applies
+
 **Changed**
 - Consolidated the two near-duplicate `docker-compose.yml` files (root +
   `docker/`) into one, `docker/docker-compose.yml` — the root copy is

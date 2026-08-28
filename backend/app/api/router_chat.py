@@ -21,9 +21,10 @@ from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
 from app.database.schemas import ChatMessage
+from app.database.schemas import Claim as ClaimRow
 from app.models.claim import Claim
 from app.models.response import ChatRequest, ChatResponse
-from app.services.ml_singletons import get_qa_chain
+from app.services.ml_singletons import GPU_LOCK, get_qa_chain
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -34,7 +35,10 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     db.commit()
 
     try:
-        chain_response = get_qa_chain().answer(request.message)
+        # GPU_LOCK: see ml_singletons.py's docstring -- keeps this from
+        # racing document ingestion for VRAM.
+        with GPU_LOCK:
+            chain_response = get_qa_chain().answer(request.message)
     except Exception as exc:  # noqa: BLE001 -- surfaced to the caller, not swallowed
         raise HTTPException(status_code=502, detail=f"ml pipeline failed: {exc}") from exc
 
@@ -56,6 +60,24 @@ def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         claims=[c.model_dump() for c in claims],
     )
     db.add(assistant_message)
+    db.flush()  # assigns assistant_message.id without a second round trip
+
+    # Also persisted as individual rows (not just the JSON snapshot above)
+    # so claims are queryable in SQL -- e.g. for evaluation/analytics --
+    # without parsing every chat_messages.claims blob.
+    for claim in claims:
+        db.add(
+            ClaimRow(
+                chat_message_id=assistant_message.id,
+                statement=claim.statement,
+                status=claim.status.value,
+                confidence=claim.confidence,
+                source_url=claim.source_url,
+                source_filename=claim.source_filename,
+                source_span_start=claim.source_span[0] if claim.source_span else None,
+                source_span_end=claim.source_span[1] if claim.source_span else None,
+            )
+        )
     db.commit()
 
     return ChatResponse(

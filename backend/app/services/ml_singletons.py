@@ -23,10 +23,28 @@ CHROMA_PERSIST_DIR) would silently miss it unless we thread the value
 through explicitly here.
 """
 
+import threading
 from functools import lru_cache
 from pathlib import Path
 
 from app.config import get_settings
+
+# Serializes GPU-heavy operations across requests: document ingestion
+# (Ollama prose extraction, then MedCPT embedding via get_retriever()) and
+# chat generation (Ollama generate, then MedCPT retrieval + BART-MNLI
+# verification) can each independently OOM an 8GB GPU if they run
+# concurrently, since get_retriever()'s embedding model stays VRAM-resident
+# for the process's life once loaded (see this module's docstring) -- there
+# is no way to guarantee ingestion finishes and releases its Ollama calls
+# before a chat request loads the embedding model, or vice versa, without
+# forcing the two to not overlap. A single process-wide lock is the
+# documented mitigation in docs/BACKEND_HANDOFF.md's "VRAM ordering risk"
+# known gap; acquired by router_chat.py's chat() and
+# document_processor.py's process_document(), both of which run on worker
+# threads (FastAPI's threadpool for sync routes, BackgroundTasks' worker
+# thread for _run_processing), so blocking here doesn't block the event
+# loop -- it only serializes these two call sites against each other.
+GPU_LOCK = threading.Lock()
 
 
 @lru_cache

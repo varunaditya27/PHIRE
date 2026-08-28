@@ -9,14 +9,23 @@
 # Privacy constraint: no service in this file may call out to external/
 # cloud APIs — all inference and storage must stay on the local network.
 #
-# backend runs with network_mode: host -- see ../docker-compose.yml's
-# header comment for why (ml/'s require_localhost() check rejects
-# bridge-network service names like "ollama"/"neo4j"). Known
-# incompatibility: the optional nginx proxy profile below targets
-# "backend:8000" on the bridge network, which a host-networked backend
-# no longer answers on -- the proxy profile is not currently usable
-# together with ml/-backed routes; hit the backend directly on
-# localhost:8000 instead until that's resolved.
+# backend runs with network_mode: host, not compose's default bridge
+# network: ml.llm.ollama_client.OllamaClient and ml.graph.client.GraphClient
+# both call ml.local_only.require_localhost() on their configured host,
+# which only accepts a URI whose hostname is literally localhost/127.0.0.1/
+# ::1 -- a bridge-network service name like "ollama" or "neo4j" fails that
+# check even though the connection would otherwise work (see
+# ml/local_only.py's docstring for why: closing a real prefix-bypass
+# privacy hole, not a stray restriction to route around here). Host
+# networking makes every other container's *published* port reachable at
+# localhost from inside the backend container, which satisfies the check
+# without touching ml/'s code. Trade-off: host networking is Linux-native;
+# Docker Desktop (Mac/Windows) only added a beta opt-in for it in 4.29+ --
+# see docs/BACKEND_HANDOFF.md's "Running with Docker" section for the
+# current per-platform status and the run-backend-locally fallback.
+#
+# The optional nginx proxy profile below is host-networked too, for the
+# same reason -- see nginx.conf's header comment.
 
 services:
   postgres:
@@ -109,11 +118,10 @@ services:
 
   nginx:
     image: nginx:alpine
-    profiles: ["proxy"]  # opt-in: `docker compose --profile proxy up` -- see header comment's caveat
+    profiles: ["proxy"]  # opt-in: `docker compose --profile proxy up`
+    network_mode: host   # see nginx.conf's header comment -- same reason as `backend`'s
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    ports:
-      - "80:80"
     depends_on:
       - backend
       - frontend

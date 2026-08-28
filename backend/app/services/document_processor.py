@@ -11,19 +11,11 @@ standalone parser (PyMuPDF + a regex lab-line matcher) did none of that.
 This module is orchestration only: it drives ml/'s building blocks
 against one uploaded Document row and updates that row's status.
 
-VRAM ordering: all Ollama calls (prose extraction here; OCR already ran
-inside extract_text if the upload was an image) happen before this
-module touches app.services.ml_singletons.get_retriever() (which loads
-the MedCPT embedding model) -- see ingest_patient_document.py's main()
-docstring for why concurrent residency OOMs an 8GB GPU. Because
-get_retriever() is a shared, process-lifetime singleton (see
-ml_singletons.py's module docstring), this ordering only actually holds
-on a *fresh* backend process where nothing has called get_retriever()
-yet -- once any request (a chat, a search) has loaded the embedding
-model once, it stays resident for the rest of the process's life, and a
-low-VRAM machine ingesting a document concurrently with that risks the
-same OOM ml/'s CLI script was ordered specifically to avoid. Documented
-as a known limitation in backend_handoff.md, not solved here.
+VRAM ordering: the whole ml/-facing pipeline below (Ollama OCR/prose
+extraction, then MedCPT embedding via get_retriever()) runs under
+app.services.ml_singletons.GPU_LOCK, which also guards router_chat.py's
+chat generation -- see that module's docstring for why concurrent GPU
+work between ingestion and chat generation can OOM an 8GB GPU.
 """
 
 from datetime import datetime
@@ -32,7 +24,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.database.schemas import Document
-from app.services.ml_singletons import get_retriever, new_graph_client
+from app.services.ml_singletons import GPU_LOCK, get_retriever, new_graph_client
 from app.utils.constants import DocumentStatus
 
 
@@ -53,24 +45,31 @@ def process_document(db: Session, document: Document) -> None:
 
         path = Path(document.storage_path)
 
-        text = extract_text(path)
-        if not text:
-            raise ValueError(
-                f"No text extracted from {path.name} -- likely a scanned PDF with no embedded "
-                "text layer (see ml/rag/ingest/patient_documents.py's PDFTextExtractor docstring)."
-            )
+        # GPU_LOCK held for this whole span, not just the embedding call --
+        # extract_text (OCR, scanned docs) and extract_facts (prose
+        # extraction) are Ollama calls too, and get_retriever() loads/uses
+        # the MedCPT embedding model (see this module's + ml_singletons.py's
+        # docstrings).
+        with GPU_LOCK:
+            text = extract_text(path)
+            if not text:
+                raise ValueError(
+                    f"No text extracted from {path.name} -- likely a scanned PDF with no embedded "
+                    "text layer (see ml/rag/ingest/patient_documents.py's PDFTextExtractor docstring)."
+                )
 
-        # Reuse the Document row's own id as ml/'s document_id (instead of
-        # letting build_chunks re-hash the file) so graph facts and Chroma
-        # chunks both key back to the same id this row exposes via the API.
-        document_id = str(document.id)
-        effective_date = find_document_date(text)
+            # Reuse the Document row's own id as ml/'s document_id (instead
+            # of letting build_chunks re-hash the file) so graph facts and
+            # Chroma chunks both key back to the same id this row exposes
+            # via the API.
+            document_id = str(document.id)
+            effective_date = find_document_date(text)
 
-        table_observations = build_table_observations(text, document_id, effective_date)
-        facts = extract_facts(text)
+            table_observations = build_table_observations(text, document_id, effective_date)
+            facts = extract_facts(text)
 
-        chunks = build_chunks(path, text=text, document_id=document_id)
-        get_retriever().add_documents(chunks)
+            chunks = build_chunks(path, text=text, document_id=document_id)
+            get_retriever().add_documents(chunks)
 
         medications = build_medications(facts["medications"], text, document_id, effective_date)
         conditions = build_conditions(facts["conditions"], text, document_id, effective_date)
