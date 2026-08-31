@@ -1,0 +1,100 @@
+{
+  "version": "1.0",
+  "description": "PHIRE pipeline model/OCR selection benchmark manifest. Keep real evaluation data outside the repository when licensing or PHI constraints require it.",
+  "cases": [
+    {
+      "id": "lab_digital_001",
+      "patient_id": "patient_001",
+      "type": "lab_report",
+      "source": "real_indian|synthetic|external",
+      "path": "path/to/document.pdf",
+      "gold": {
+        "text": "Patient ... LDL Cholesterol 162 mg/dL ...",
+        "critical_fields": [
+          {"name": "LDL", "value": "162", "alternatives": ["162.0"]},
+          {"name": "mg/dL", "value": "mg/dL", "alternatives": ["mg/dl"]}
+        ],
+        "observations": [
+          {
+            "name": "LDL",
+            "value": 162,
+            "unit": "mg/dL",
+            "date": "2026-08-20",
+            "reference_range": "<100",
+            "interpretation": "high"
+          }
+        ],
+        "medications": [],
+        "conditions": []
+      },
+      "tags": ["lab", "numeric", "table", "indian"]
+    },
+    {
+      "id": "prescription_handwritten_001",
+      "patient_id": "patient_002",
+      "type": "prescription",
+      "source": "synthetic",
+      "path": "path/to/prescription.png",
+      "gold": {
+        "critical_fields": [
+          {"name": "atorvastatin", "value": "atorvastatin"},
+          {"name": "20 mg", "value": "20 mg"}
+        ],
+        "observations": [],
+        "medications": [
+          {
+            "name": "atorvastatin",
+            "dose": "20 mg",
+            "frequency": "once daily",
+            "route": "oral",
+            "duration": "30 days",
+            "status": "started",
+            "date": "2026-08-20"
+          }
+        ],
+        "conditions": []
+      },
+      "tags": ["prescription", "handwriting", "medication-status"]
+    },
+    {
+      "id": "prose_only_001",
+      "patient_id": "patient_003",
+      "type": "op_consult",
+      "source": "synthetic",
+      "text": "History of hypertension. Lisinopril 10 mg once daily is continued. Aspirin was discontinued last month.",
+      "gold": {
+        "observations": [],
+        "medications": [
+          {
+            "name": "lisinopril",
+            "dose": "10 mg",
+            "frequency": "once daily",
+            "route": "oral",
+            "duration": "",
+            "status": "continued",
+            "date": "2026-08-20"
+          },
+          {
+            "name": "aspirin",
+            "dose": "",
+            "frequency": "",
+            "route": "",
+            "duration": "",
+            "status": "discontinued",
+            "date": "2026-07-20"
+          }
+        ],
+        "conditions": [
+          {
+            "name": "hypertension",
+            "status": "active",
+            "certainty": "confirmed",
+            "temporality": "history/current",
+            "date": "2026-08-20"
+          }
+        ]
+      },
+      "tags": ["prose", "negation", "temporality", "medication-action"]
+    }
+  ]
+}
