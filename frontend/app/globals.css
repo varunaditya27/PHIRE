@@ -1,26 +1,163 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  
+  --color-evidence: var(--evidence);
+  --color-evidence-hover: var(--evidence-hover);
+  --color-evidence-soft: var(--evidence-soft);
+
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-editorial: var(--font-newsreader), ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  /* Core Foundation from DESIGN.md */
+  --canvas: #F5F1E8;
+  --surface: #FBF9F3;
+  --surface-raised: #FFFFFF;
+  --surface-subtle: #ECE7DA;
+
+  --ink: #1C1A15;
+  --ink-secondary: #55503F;
+  --ink-muted: #7A755F;
+  --ink-faint: #9C9782;
+
+  --line: #DDD6C4;
+  --line-strong: #C2BAA2;
+
+  /* Ledger accent */
+  --accent-base: #8C3F2B;
+  --accent-hover: #732F1F;
+  --accent-soft: #EFDCD2;
+
+  /* Evidence accent */
+  --evidence: #96742A;
+  --evidence-hover: #7C5E1E;
+  --evidence-soft: #F1E6C8;
+
+  --positive: #33684D;
+  --positive-soft: #E1EBE3;
+
+  --warning: #96631F;
+  --warning-soft: #F0E4CC;
+
+  --danger: #9C4437;
+  --danger-soft: #F1DED9;
+
+  --info: #3F5F72;
+  --info-soft: #DEE7EA;
+
+  /* Map to UI standard variables */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  
+  --primary: var(--accent-base);
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: var(--surface-subtle);
+  --secondary-foreground: var(--ink);
+  
+  --muted: var(--surface);
+  --muted-foreground: var(--ink-muted);
+  
+  --accent: var(--accent-base);
+  --accent-foreground: #FFFFFF;
+  
+  --border: var(--line);
+  --card: var(--surface-raised);
+  --card-foreground: var(--ink);
+}
+
+[data-theme='dark'] {
+  /* We will invert these slightly for a dark mode while maintaining the warm neutral feel if needed, 
+     but DESIGN.md prefers paper/ink. For now, we will maintain dark mode support by using a warm dark palette. */
+  --canvas: #1C1A15;
+  --surface: #26241D;
+  --surface-raised: #2F2D25;
+  --surface-subtle: #161510;
+
+  --ink: #F5F1E8;
+  --ink-secondary: #D4CDBC;
+  --ink-muted: #9C9782;
+  --ink-faint: #7A755F;
+
+  --line: #423F36;
+  --line-strong: #5E5A4D;
+
+  /* Ledger accent */
+  --accent-base: #A85A46;
+  --accent-hover: #C2705C;
+  --accent-soft: #3D1E16;
+
+  /* Evidence accent */
+  --evidence: #B8964C;
+  --evidence-hover: #CFA95E;
+  --evidence-soft: #382A0F;
+
+  --positive: #4A8C69;
+  --positive-soft: #142E20;
+
+  --warning: #B88540;
+  --warning-soft: #38250B;
+
+  --danger: #C26255;
+  --danger-soft: #3D120B;
+
+  --info: #5B849C;
+  --info-soft: #172A36;
+  
+  /* Map to UI standard variables */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  
+  --primary: var(--accent-base);
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: var(--surface-subtle);
+  --secondary-foreground: var(--ink);
+  
+  --muted: var(--surface);
+  --muted-foreground: var(--ink-muted);
+  
+  --accent: var(--accent-base);
+  --accent-foreground: #FFFFFF;
+  
+  --border: var(--line);
+  --card: var(--surface-raised);
+  --card-foreground: var(--ink);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+}
+
+/* Custom Scrollbar - removed futuristic look */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-muted);
 }
