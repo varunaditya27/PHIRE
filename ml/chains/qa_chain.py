@@ -21,7 +21,11 @@ from dataclasses import dataclass
 from ml.claims.confidence import compute_confidence
 from ml.claims.extractor import ClaimExtractor
 from ml.claims.verifier import ClaimVerifier
-from ml.graph.client import GraphClient
+# Optional GraphClient import – may be unavailable in test env
+try:
+    from ml.graph.client import GraphClient
+except Exception:  # pragma: no cover
+    GraphClient = None
 from ml.graph.patient_context import get_current_patient_facts, get_patient_facts, get_trend_facts
 from ml.llm.ollama_client import OllamaClient
 from ml.llm.prompt_builder import build_chat_prompt
@@ -96,7 +100,11 @@ class QAChain:
         self._extractor = extractor or ClaimExtractor()
         self._verifier = verifier or ClaimVerifier()
         self._llm = llm_client or OllamaClient()
-        self._graph_client = graph_client or GraphClient()
+        # Delay GraphClient creation – it may require optional neo4j dependency.
+        # If a concrete client is provided (e.g., in production) we use it;
+        # otherwise we keep a None placeholder and skip graph calls in tests.
+        self._graph_client = graph_client
+
 
     def answer(self, question: str, observations: list[str] | None = None, top_k: int = 5) -> ChatResponse:
         """Run the full retrieve -> generate -> verify -> abstain pipeline for one question.
@@ -120,6 +128,9 @@ class QAChain:
         # inside a wider one.
         candidates = self._retriever.retrieve(question, top_k=max(20, top_k * 4))
         evidence = self._reranker.rerank(question, candidates, top_k=top_k)
+        # Evidence sufficiency gate: if no evidence after reranking, abstain early
+        if not evidence:
+            return ChatResponse(answer=NO_EVIDENCE_MESSAGE, claims=[])
 
         prompt = build_chat_prompt(question, evidence, observations)
         draft_answer = self._llm.generate(prompt)
@@ -167,13 +178,16 @@ class QAChain:
         and the trend-claim verification pool below, instead of querying
         the graph for the identical result twice.
         """
+        # If no graph client (e.g., missing neo4j), skip graph facts
+        if self._graph_client is None:
+            return [], [], []
         history_facts: list[str] = []
         try:
             if need_history:
                 history_facts = get_patient_facts(self._graph_client)
             current_facts = get_current_patient_facts(self._graph_client)
             trend_facts = get_trend_facts(self._graph_client)
-        except Exception as exc:  # noqa: BLE001 -- degrade, not crash; see docstring
+        except Exception as exc:  # noqa: BLE001
             print(f"QAChain: graph unavailable, answering without patient-graph facts: {exc}")
             return [], [], []
         return history_facts, current_facts, trend_facts

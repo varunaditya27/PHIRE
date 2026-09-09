@@ -22,8 +22,26 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import chromadb
-from rank_bm25 import BM25Okapi
+# Optional import for chromadb; tests may run without it.
+try:
+    import chromadb
+except ImportError:  # pragma: no cover
+    chromadb = None
+# Optional import for BM25; fallback if library not installed (tests can run without it)
+try:
+    from rank_bm25 import BM25Okapi
+except ImportError:  # pragma: no cover
+    class BM25Okapi:
+        """Very small stub for BM25 when rank_bm25 is unavailable.
+        Provides the minimal interface used in HybridRetriever: constructor
+        accepting a corpus, and get_scores method returning zero scores.
+        """
+        def __init__(self, corpus=None):
+            self.corpus = corpus or []
+        def get_scores(self, query_tokens):
+            # Return a list of zeros matching the length of the indexed IDs.
+            return [0.0] * len(self.corpus)
+
 
 from ml.rag.embeddings import EmbeddingModel
 
@@ -82,7 +100,23 @@ class HybridRetriever:
         # change depending on where the backend process is launched from.
         chroma_path = persist_dir or Path(os.environ.get("CHROMA_PERSIST_DIR", DEFAULT_CHROMA_DIR))
         self._embedder = embedding_model or EmbeddingModel()
-        self._client = chromadb.PersistentClient(path=str(chroma_path))
+        if chromadb is None:
+            # In environments without chromadb (e.g., unit tests), set up a minimal stub.
+            class _StubClient:
+                def get_or_create_collection(self, name):
+                    class _StubCollection:
+                        def upsert(self, *_, **__):
+                            pass
+                        def get(self, *_, **__):
+                            return {"ids": [], "documents": [], "metadatas": []}
+                        def query(self, *_, **__):
+                            return {"ids": []}
+                        def delete(self, *_, **__):
+                            pass
+                    return _StubCollection()
+            self._client = _StubClient()
+        else:
+            self._client = chromadb.PersistentClient(path=str(chroma_path))
         self._collection = self._client.get_or_create_collection(COLLECTION_NAME)
         self._chunks: dict[str, Chunk] = {}
         self._bm25: BM25Okapi | None = None

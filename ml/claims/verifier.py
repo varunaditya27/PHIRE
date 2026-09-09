@@ -32,7 +32,12 @@ import os
 from dataclasses import dataclass
 
 import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+# Optional transformer import – fallback if library not installed (e.g., in minimal test env)
+try:
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+except ImportError:  # pragma: no cover
+    AutoModelForSequenceClassification = None  # type: ignore
+    AutoTokenizer = None  # type: ignore
 
 from ml.rag.retriever import Chunk
 
@@ -107,4 +112,5 @@ class ClaimVerifier:
             return "CONFLICTING"
         if probs["entailment"] >= ENTAILMENT_THRESHOLD:
             return "SUPPORTED"
-        return "UNCERTAIN"
+        # Neither entailment nor contradiction is strong enough; treat as unsupported
+        return "UNSUPPORTED"

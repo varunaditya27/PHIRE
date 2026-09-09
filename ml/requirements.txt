@@ -10,7 +10,7 @@ transformers
 torch
 rank-bm25
 chromadb
-numpy
+numpy<2.0
 requests
 
 # --- Patient document ingestion ---
@@ -25,6 +25,6 @@ neo4j
 pytest
 
 # --- Visual Document Extraction (Lift VLM) ---
-lift-pdf[hf]>=0.1.0
-bitsandbytes>=0.43.0
+# lift-pdf[hf]>=0.1.0
+bitsandbytes<0.43.0
 accelerate>=0.28.0

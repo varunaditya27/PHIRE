@@ -25,6 +25,9 @@ from app.database.schemas import Claim as ClaimRow
 from app.models.claim import Claim
 from app.models.response import ChatRequest, ChatResponse
 from app.services.ml_singletons import GPU_LOCK, get_qa_chain
+from app.services.intent_classifier import classify_intent, Intent
+from ml.graph.patient_context import get_current_patient_facts
+from app.services.ml_singletons import new_graph_client
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -33,6 +36,23 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     db.add(ChatMessage(role="user", content=request.message))
     db.commit()
+
+    intent = classify_intent(request.message)
+    if intent == Intent.DIAGNOSIS_REQUEST:
+        msg = "I cannot provide medical diagnoses. Please consult a qualified healthcare professional."
+        assistant_message = ChatMessage(role="assistant", content=msg)
+        db.add(assistant_message)
+        db.commit()
+        return ChatResponse(id=assistant_message.id, answer=msg, claims=[], created_at=assistant_message.created_at)
+
+    if intent in (Intent.DATA_LOOKUP, Intent.TREND_ANALYSIS, Intent.HEALTH_INTERPRETATION):
+        facts = get_current_patient_facts(new_graph_client())
+        if not facts:
+            msg = "I cannot answer this as I don't have access to your patient context."
+            assistant_message = ChatMessage(role="assistant", content=msg)
+            db.add(assistant_message)
+            db.commit()
+            return ChatResponse(id=assistant_message.id, answer=msg, claims=[], created_at=assistant_message.created_at)
 
     try:
         # GPU_LOCK: see ml_singletons.py's docstring -- keeps this from

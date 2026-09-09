@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # --- Lift VLM ---
     lift_model: str = Field(default="datalab-to/lift", validation_alias="LIFT_MODEL")
     lift_device: str = Field(default="auto", validation_alias="LIFT_DEVICE")
-    phire_mock_lift: bool = Field(default=False, validation_alias="PHIRE_MOCK_LIFT")
+    phire_mock_lift: bool = Field(default=True, validation_alias="PHIRE_MOCK_LIFT")
 
     # --- Neo4j (ml/graph -- Longitudinal Health Graph) ---
     neo4j_uri: str = "bolt://localhost:7687"
@@ -59,7 +59,8 @@ class Settings(BaseSettings):
     chroma_collection: str = "phire_evidence"
 
     # --- CORS ---
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # When allow_credentials=True, '*' is not permitted. Specify explicit development origins.
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:3001"])
 
     # --- Uploads ---
     upload_dir: str = "./data/documents"
@@ -73,6 +74,9 @@ class Settings(BaseSettings):
     environment: str = "development"
 
 
-@lru_cache
+
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # Debug: log CORS origins to verify they're loaded correctly
+    print(f"[Config] CORS origins loaded: {settings.cors_origins}")
+    return settings

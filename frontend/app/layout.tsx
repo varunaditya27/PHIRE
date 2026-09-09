@@ -35,7 +35,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} ${newsreader.variable} h-full antialiased`}>
+      <body suppressHydrationWarning={true} className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} ${newsreader.variable} h-full antialiased`}>
         <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
           <div className="flex h-screen overflow-hidden bg-background">
             <Sidebar />

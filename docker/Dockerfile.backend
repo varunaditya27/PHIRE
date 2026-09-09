@@ -18,7 +18,7 @@
 # editing ml/ locally doesn't require an image rebuild, only its
 # dependency list changing does.
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # libpq-dev + build-essential for psycopg2 and any ml/ deps needing a
 # native build. Visual document extraction (datalab-to/lift) runs in-process
@@ -27,6 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip to the latest version to support Python 3.12 and newer packages
+RUN pip install --upgrade pip
 
 WORKDIR /app
 
