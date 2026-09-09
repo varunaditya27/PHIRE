@@ -1,37 +1,37 @@
-"""
-Unit tests for ml/rag/ingest/patient_documents.py's text extraction, using
-a small synthetic PDF fixture (ml/tests/fixtures/sample_lab_report.pdf) —
-real pypdf extraction, no mocks, since parsing correctness is the actual
-thing worth testing here.
-"""
-
 from pathlib import Path
 
 import pytest
 
-from ml.rag.ingest.patient_documents import PDFTextExtractor, extract_text
-
-FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "sample_lab_report.pdf"
-
-
-def test_pdf_extractor_supports_pdf_files():
-    extractor = PDFTextExtractor()
-    assert extractor.supports(Path("report.pdf")) is True
-    assert extractor.supports(Path("report.PDF")) is True
-    assert extractor.supports(Path("report.jpg")) is False
+from ml.rag.ingest.patient_documents import (
+    extract_document_data,
+    extract_text,
+    supports_document,
+)
 
 
-def test_pdf_extractor_extracts_text_content():
-    text = PDFTextExtractor().extract(FIXTURE_PATH)
-    assert "LDL Cholesterol: 162 mg/dL" in text
-    assert "Fasting Glucose: 128 mg/dL" in text
+def test_supports_pdf_and_images():
+    assert supports_document(Path("test.pdf"))
+    assert supports_document(Path("test.png"))
+    assert supports_document(Path("test.jpg"))
+    assert not supports_document(Path("test.exe"))
 
 
-def test_extract_text_routes_to_matching_extractor():
-    text = extract_text(FIXTURE_PATH)
-    assert "PHIRE Test Clinic" in text
+def test_extract_document_data_mock(monkeypatch, tmp_path):
+    monkeypatch.setenv("PHIRE_MOCK_LIFT", "true")
+    dummy = tmp_path / "sample.pdf"
+    dummy.write_bytes(b"%PDF dummy")
+
+    data = extract_document_data(dummy)
+    assert len(data["observations"]) > 0
+    assert len(data["medications"]) > 0
+    assert len(data["conditions"]) > 0
 
 
-def test_extract_text_raises_for_unsupported_format():
-    with pytest.raises(ValueError, match="No extractor"):
-        extract_text(Path("report.docx"))
+def test_extract_text_backward_compat(monkeypatch, tmp_path):
+    monkeypatch.setenv("PHIRE_MOCK_LIFT", "true")
+    dummy = tmp_path / "sample.pdf"
+    dummy.write_bytes(b"%PDF dummy")
+
+    text = extract_text(dummy)
+    assert isinstance(text, str)
+    assert "LDL Cholesterol" in text

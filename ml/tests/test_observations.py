@@ -3,7 +3,12 @@ Unit tests for ml/graph/observations.py's build logic (pure, no Neo4j
 dependency). See test_graph_integration.py for the live write path.
 """
 
-from ml.graph.observations import _split_value, build_prose_observations, build_table_observations
+from ml.graph.observations import (
+    _split_value,
+    build_lift_observations,
+    build_prose_observations,
+    build_table_observations,
+)
 
 TABLE_HTML = (
     "<table>\n"
@@ -104,3 +109,25 @@ def test_build_prose_observations_canonicalizes_metric_names():
     raw = [{"name": "LDL cholesterol", "value": "191 mg/dL"}]
     observations = build_prose_observations(raw, "text", document_id="doc2", effective_date="2026-03-01")
     assert observations[0]["code"] == "LDL Cholesterol"
+
+
+def test_build_lift_observations_preserves_units_range_and_interpretation():
+    raw = [{
+        "name": "LDL",
+        "value": "162",
+        "unit": "mg/dL",
+        "reference_range": "0-100",
+        "interpretation": "High",
+    }]
+    observations = build_lift_observations(raw, document_id="doc1", effective_date="2026-03-10")
+    assert len(observations) == 1
+    assert observations[0] == {
+        "id": "doc1:ldl_cholesterol",
+        "code": "LDL Cholesterol",
+        "raw_value": "162 mg/dL",
+        "value": 162.0,
+        "unit": "mg/dL",
+        "reference_range": "0-100",
+        "interpretation": "High",
+        "effective": "2026-03-10",
+    }

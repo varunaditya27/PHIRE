@@ -136,6 +136,53 @@ def build_prose_observations(
     return result
 
 
+def build_lift_observations(
+    observations: list[dict],
+    document_id: str,
+    effective_date: str | None = None,
+    *args,
+    **kwargs,
+) -> list[dict]:
+    """Attach stable id and normalized fields to Lift-extracted observations.
+
+    Preserves unit, reference_range, and interpretation produced by Lift.
+    Supports both (observations, document_id, effective_date) and
+    (observations, document_text, document_id, effective_date) signatures.
+    """
+    if args:
+        document_id, effective_date = effective_date, args[0]
+
+    result = []
+    for obs in observations:
+        code = obs.get("name")
+        val_str = str(obs.get("value", "")).strip()
+        if not code or not val_str:
+            continue
+        code = resolve_metric(code)
+        value, parsed_unit = _split_value(val_str)
+        unit = obs.get("unit")
+        if unit is not None:
+            unit = str(unit).strip() or None
+        else:
+            unit = parsed_unit
+
+        raw_value = val_str
+        if unit and unit not in val_str:
+            raw_value = f"{val_str} {unit}"
+
+        result.append({
+            "id": _stable_id(document_id, code),
+            "code": code,
+            "raw_value": raw_value,
+            "value": value,
+            "unit": unit,
+            "reference_range": obs.get("reference_range") or None,
+            "interpretation": obs.get("interpretation") or None,
+            "effective": effective_date,
+        })
+    return result
+
+
 def write_observations(
     client: GraphClient, document_id: str, filename: str, observations: list[dict],
     patient_id: str = DEFAULT_PATIENT_ID,
