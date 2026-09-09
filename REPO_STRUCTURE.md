@@ -1,6 +1,6 @@
 # PHIRE: Repository Structure
 
-**Layout**: Flat structure (no `src/` wrapper), technology folders at root
+**Layout**: Flat structure (no `src/` wrapper), subsystem folders at root.
 
 ```
 phire/
@@ -10,229 +10,179 @@ phire/
 ├── CHANGELOG.md
 │
 ├── docs/
-│   ├── FEATURES_ALIGNED.md         # Feature checklist (core + extended)
-│   ├── AGGRESSIVE_ROADMAP.md       # Build checklist: core MVP + extended features
+│   ├── CODEBASE_AUDIT.md           # Master audit: features, inconsistencies, bugs, design choices
 │   ├── BACKLOG.md                  # Known gaps, tech debt, open design questions
-│   ├── OPEN_SOURCE_TOOLS.md        # Tools catalog: adopted + evaluated-but-not-adopted candidates
+│   ├── API_REFERENCE.md            # Full request/response reference for every backend endpoint
+│   ├── FRONTEND_HANDOFF.md         # Frontend UI architecture, page inventory, and active tasks
+│   ├── BACKEND_HANDOFF.md          # backend/ <-> ml/ integration log: what changed, fixed, tested
+│   ├── FEATURES_ALIGNED.md         # Feature checklist (core + extended, aligned to NLP-06)
+│   ├── AGGRESSIVE_ROADMAP.md       # Build checklist: core MVP + extended features
+│   ├── OPEN_SOURCE_TOOLS.md        # Tools catalog: adopted + evaluated candidates
 │   ├── DATASETS_AND_GRAPH_RAG.md   # Finalized datasets/models + graph RAG architecture
 │   ├── GRAPH_SCHEMA_ROADMAP.md     # Longitudinal Health Graph: current schema + deferred work
 │   ├── PDF_INGESTION_ROADMAP.md    # Scanned-PDF ingestion gap: decided design, not yet built
 │   ├── ML_HANDOFF_FOR_ANIKA.md     # ml/ -> backend/ integration contract
-│   ├── BACKEND_HANDOFF.md          # backend/ <-> ml/ integration log: what changed, fixed, tested
-│   ├── API_REFERENCE.md            # Full request/response reference for every backend endpoint
-│   ├── FRONTEND_HANDOFF.md         # Start here for frontend/ work
-│   └── RESEARCH_LOG.md             # Dated findings/decisions, reusable for paper drafting
+│   └── RESEARCH_LOG.md             # Dated findings/decisions for paper drafting
 │
 ├── backend/                         # ANIKA OWNS — see backend/README.md
 │   ├── README.md                    # API surface, architecture, configuration, quick start
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI app entry
-│   │   ├── config.py               # Settings, env vars
-│   │   ├── security.py             # HIPAA, encryption, logging
-│   │   │
-│   │   ├── api/
-│   │   │   ├── __init__.py
-│   │   │   ├── router_documents.py   # POST /api/documents/*
-│   │   │   ├── router_observations.py # GET /api/patient/*/observations
-│   │   │   ├── router_chat.py        # POST /api/chat
-│   │   │   ├── router_search.py      # GET /api/search/*
-│   │   │   ├── router_health.py      # POST /api/health
-│   │   │   ├── router_evidence.py    # POST /api/evidence/retrieve, /verify
-│   │   │   ├── router_claims.py      # POST /api/claims/extract
-│   │   │   └── router_recommendations.py # GET /api/recommendations/*
-│   │   │
-│   │   ├── models/                 # Pydantic schemas
-│   │   │   ├── document.py
-│   │   │   ├── observation.py
-│   │   │   ├── claim.py
-│   │   │   └── response.py
-│   │   │
-│   │   ├── database/
-│   │   │   ├── __init__.py
-│   │   │   ├── connection.py       # PostgreSQL connection
-│   │   │   ├── schemas.py          # SQLAlchemy models
-│   │   │   └── migrations/         # Alembic migrations
-│   │   │
-│   │   ├── services/
-│   │   │   ├── document_processor.py  # PDF → text (Docling, OCR)
-│   │   │   ├── timeline_builder.py    # Temporal normalization
-│   │   │   ├── embedding_service.py   # Vector DB interaction
-│   │   │   └── audit_logger.py        # HIPAA compliance logging
-│   │   │
-│   │   └── utils/
-│   │       ├── validators.py
-│   │       ├── encryption.py
-│   │       └── constants.py
-│   │
 │   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env.example
+│   ├── alembic.ini
+│   ├── .env.example
+│   │
+│   └── app/
+│       ├── __init__.py
+│       ├── main.py                 # FastAPI app entry & middleware assembly
+│       ├── config.py               # Pydantic Settings & environment variables
+│       ├── security.py             # Localhost boundary & HIPAA audit middleware
+│       │
+│       ├── api/
+│       │   ├── __init__.py
+│       │   ├── router_health.py      # POST /api/health, GET /api/ping
+│       │   ├── router_chat.py        # POST /api/chat
+│       │   ├── router_documents.py   # POST /api/documents/upload, /process, GET /{id}
+│       │   ├── router_observations.py# GET /api/observations, GET /api/timeline
+│       │   ├── router_search.py      # GET /api/search/evidence
+│       │   ├── router_evidence.py    # POST /api/evidence/retrieve, POST /api/evidence/verify
+│       │   ├── router_claims.py      # POST /api/claims/extract
+│       │   └── router_recommendations.py # GET /api/recommendations/* (501 stubs)
+│       │
+│       ├── models/                 # Pydantic request/response schemas
+│       │   ├── __init__.py
+│       │   ├── document.py
+│       │   ├── observation.py
+│       │   ├── claim.py
+│       │   └── response.py
+│       │
+│       ├── database/
+│       │   ├── __init__.py
+│       │   ├── connection.py       # PostgreSQL engine & sessionmaker
+│       │   ├── schemas.py          # SQLAlchemy models (documents, chat_messages, claims, audit_log)
+│       │   └── migrations/         # Alembic migration versions
+│       │
+│       ├── services/
+│       │   ├── __init__.py
+│       │   ├── document_processor.py  # Background ingestion & transactional rollback
+│       │   ├── graph_reader.py        # Cypher queries for timeline & observations
+│       │   ├── ml_singletons.py       # Lazy cached ML models & GPU_LOCK serialization
+│       │   ├── citations.py           # Citation formatters
+│       │   └── audit_logger.py        # Dual PostgreSQL & disk file audit logger
+│       │
+│       └── utils/
+│           ├── __init__.py
+│           ├── validators.py       # Upload size & MIME validation
+│           ├── encryption.py       # Fernet symmetric encryption helper
+│           └── constants.py        # Enums & MIME types
 │
-├── frontend/                        # SHASHWATI OWNS
-│   ├── app/
-│   │   ├── layout.tsx              # Root layout (auth, theme)
-│   │   ├── page.tsx                # Home page
-│   │   ├── globals.css             # Global styles
-│   │   │
-│   │   ├── dashboard/
-│   │   │   ├── layout.tsx          # Dashboard layout
-│   │   │   ├── page.tsx            # Dashboard home
-│   │   │   ├── chat/
-│   │   │   │   └── page.tsx        # Chat interface
-│   │   │   ├── timeline/
-│   │   │   │   └── page.tsx        # Health timeline view
-│   │   │   └── documents/
-│   │   │       └── page.tsx        # Document management
-│   │   │
-│   │   └── api/                    # Next.js API routes (proxy if needed)
-│   │       └── health.ts
-│   │
-│   ├── components/
-│   │   ├── ChatInterface.tsx       # Main chat component
-│   │   ├── ChatMessage.tsx         # Individual message display
-│   │   ├── EvidenceDisplay.tsx     # Source highlighting
-│   │   ├── ClaimCard.tsx           # Individual claim
-│   │   ├── Timeline.tsx            # Health timeline chart
-│   │   ├── DocumentUpload.tsx      # File upload
-│   │   ├── StreamingResponse.tsx   # Real-time LLM output
-│   │   ├── Header.tsx
-│   │   ├── Sidebar.tsx
-│   │   └── Layout.tsx
-│   │
-│   ├── hooks/
-│   │   ├── useChat.ts              # Chat state management
-│   │   ├── usePatientData.ts       # Patient context
-│   │   └── useApi.ts               # API integration
-│   │
-│   ├── types/
-│   │   ├── chat.ts
-│   │   ├── patient.ts
-│   │   ├── evidence.ts
-│   │   └── api.ts
-│   │
-│   ├── lib/
-│   │   ├── api-client.ts           # Axios/fetch wrapper
-│   │   ├── utils.ts
-│   │   └── constants.ts
-│   │
-│   ├── public/
-│   │   ├── favicon.ico
-│   │   └── images/
-│   │
+├── frontend/                        # SHASHWATI OWNS — see docs/FRONTEND_HANDOFF.md
 │   ├── package.json
 │   ├── tsconfig.json
-│   ├── tailwind.config.js
-│   ├── next.config.js
-│   ├── Dockerfile
-│   └── .env.example
+│   ├── next.config.ts
+│   ├── postcss.config.mjs
+│   ├── eslint.config.mjs
+│   ├── README.md
+│   │
+│   ├── app/
+│   │   ├── layout.tsx              # Root layout (fonts, ThemeProvider, Sidebar)
+│   │   ├── globals.css             # Global Tailwind tokens & design tokens
+│   │   ├── page.tsx                # Dashboard (timeline charts & observations)
+│   │   ├── chat/
+│   │   │   └── page.tsx            # Evidence-Attributed Medical Chat UI
+│   │   ├── documents/
+│   │   │   └── page.tsx            # Drag-and-drop document uploader & status
+│   │   └── search/
+│   │       └── page.tsx            # Hybrid evidence search & claim verifier
+│   │
+│   ├── components/
+│   │   ├── sidebar.tsx             # Main navigation & theme toggle
+│   │   └── theme-provider.tsx      # next-themes provider wrapper
+│   │
+│   ├── lib/
+│   │   ├── api.ts                  # Typed backend fetch wrapper & models
+│   │   └── utils.ts                # Tailwind clsx/twMerge utility
+│   │
+│   └── public/                     # Static assets & SVG icons
 │
 ├── ml/                              # VARUN OWNS — see ml/README.md
 │   ├── README.md                    # Architecture, quick start, model choices, feature status
+│   ├── requirements.txt
 │   ├── __init__.py
-│   ├── local_only.py                # Shared "must resolve to localhost" enforcement (Ollama, Neo4j)
+│   ├── local_only.py                # Universal localhost address validator
 │   │
 │   ├── rag/
 │   │   ├── __init__.py
-│   │   ├── retriever.py            # Chroma + BM25 hybrid retrieval (reciprocal rank fusion)
-│   │   ├── reranker.py             # MedCPT cross-encoder + authority/recency scoring
-│   │   ├── embeddings.py           # MedCPT dual-encoder embedding pipeline
-│   │   ├── ingest/                 # Patient document + reference-evidence ingestion
-│   │   │   ├── ingest_patient_document.py  # Entry point: PDF/image -> chunks + graph facts
-│   │   │   ├── run_ingest.py               # Entry point: PubMed/MedlinePlus/USDA -> reference corpus
-│   │   │   ├── ocr.py, patient_documents.py, chunking.py, table_parsing.py
+│   │   ├── embeddings.py           # MedCPT query/article dual-encoder
+│   │   ├── retriever.py            # Hybrid BM25 + Chroma retrieval with RRF fusion
+│   │   ├── reranker.py             # MedCPT Cross-Encoder with structural patient floor
+│   │   ├── ingest/                 # Document & reference ingestion pipeline
+│   │   │   ├── ingest_patient_document.py  # Patient PDF/image ingestion coordinator
+│   │   │   ├── run_ingest.py               # Reference ingestion runner (manifest generator)
+│   │   │   ├── chunking.py, ocr.py, patient_documents.py, table_parsing.py
 │   │   │   ├── pubmed.py, medlineplus.py, usda.py, topics.py
-│   │   │   └── experiments/        # OCR/router model-selection benchmarks
-│   │   ├── reranker_experiments/   # Reranker weight-tuning benchmark
-│   │   └── experiments/            # Embedding model-selection benchmark
+│   │   │   ├── experiments/        # Vision OCR model selection
+│   │   │   └── router_experiments/ # OCR router benchmark
+│   │   ├── reranker_experiments/   # Reranker tuning experiments & results
+│   │   └── experiments/            # Embedding benchmark & candidate evaluations
 │   │
 │   ├── claims/
 │   │   ├── __init__.py
-│   │   ├── extractor.py            # LLM-based atomic claim extraction
-│   │   ├── verifier.py             # NLI-based verification (BART-large-MNLI)
-│   │   ├── confidence.py           # Confidence scoring
-│   │   └── experiments/            # NLI model-selection benchmark
+│   │   ├── extractor.py            # Atomic claim extraction via medgemma:4b / qwen3.5:9b
+│   │   ├── verifier.py             # BART-large-MNLI claim verifier
+│   │   ├── confidence.py           # NLI confidence calculation
+│   │   └── experiments/            # NLI model benchmark & candidate evaluations
 │   │
 │   ├── graph/                       # Longitudinal Health Graph (Neo4j)
-│   │   ├── client.py                # Neo4j driver wrapper (localhost-enforced)
-│   │   ├── observations.py, medications.py, conditions.py  # Build + write typed facts
-│   │   ├── document_dates.py        # Document date extraction (day-first, DOB-aware)
-│   │   ├── metric_resolver.py       # Canonical lab/vital metric names
-│   │   ├── prose_extraction.py      # LLM extraction of facts from free text
-│   │   ├── patient_context.py       # Read path: current facts + trend deltas, feeds chat
-│   │   └── experiments/            # Prose-extraction method/model benchmark
+│   │   ├── __init__.py
+│   │   ├── client.py                # Localhost-enforced Neo4j client
+│   │   ├── observations.py, medications.py, conditions.py  # Graph entity builders
+│   │   ├── document_dates.py        # Day-first clinical date parser
+│   │   ├── metric_resolver.py       # Canonical metric normalization dictionary
+│   │   ├── prose_extraction.py      # Schema-constrained prose fact extraction
+│   │   ├── patient_context.py       # Graph read queries & trend delta precomputation
+│   │   ├── deletion.py              # Ingestion rollback node/edge cleanup
+│   │   └── experiments/            # Extraction model benchmark & results
 │   │
 │   ├── llm/
 │   │   ├── __init__.py
-│   │   ├── prompt_builder.py       # Context + prompt construction
-│   │   ├── ollama_client.py        # Ollama API wrapper (medgemma:4b default)
-│   │   └── prompts.py              # Prompt templates
+│   │   ├── ollama_client.py        # Local Ollama HTTP client
+│   │   ├── prompt_builder.py       # Context assembly & length truncation
+│   │   └── prompts.py              # Medical system prompts & safety disclaimers
 │   │
-│   ├── recommendations/             # Not yet implemented (stubs only)
+│   ├── recommendations/             # Post-MVP research stubs
 │   │   ├── __init__.py
-│   │   ├── fitness/
-│   │   │   ├── har_model.py        # Activity recognition (PAMAP2) — planned
-│   │   │   └── recommendations.py  # Fitness suggestions — planned
-│   │   └── nutrition/
-│   │       ├── model.py            # Nutrition model — planned
-│   │       └── meal_generator.py   # Meal plan generation — planned
+│   │   ├── fitness/ (har_model.py, recommendations.py)
+│   │   └── nutrition/ (meal_generator.py, model.py)
 │   │
 │   ├── chains/
 │   │   ├── __init__.py
-│   │   └── qa_chain.py             # Hand-written QA orchestration (retrieve -> generate -> verify -> abstain)
+│   │   └── qa_chain.py             # End-to-end Reverse-RAG orchestrator
 │   │
-│   ├── tests/                       # pytest suite: unit, live-Neo4j integration, live end-to-end
-│   │
-│   └── requirements.txt
+│   └── tests/                       # 204 pytest unit & integration tests (187 unit + 17 live)
 │
-├── evaluation/                      # SHASHWATI OWNS
-│   ├── __init__.py
-│   ├── metrics.py                  # Evidence attribution, hallucination metrics
-│   ├── baselines.py                # RAG baseline comparison
-│   ├── benchmarks/
-│   │   ├── archehr_qa.py           # ArchEHR-QA evaluation
-│   │   └── medhallbench.py         # Hallucination benchmark
-│   ├── ablations.py                # Ablation studies
-│   ├── utils.py
-│   ├── results/
-│   │   ├── metrics_summary.json
-│   │   ├── ablation_results.csv
-│   │   └── figures/
-│   │       ├── accuracy_comparison.png
-│   │       ├── ablation_impact.png
-│   │       └── latency_profile.png
-│   └── notebooks/
-│       ├── analysis.ipynb          # EDA, results exploration
-│       └── statistical_tests.ipynb
+├── evaluation/                      # SHASHWATI OWNS (Planned / Scheduled)
+│   └── (ArchEHR-QA & MedHallBench benchmarks)
 │
 ├── docker/
-│   ├── Dockerfile.backend
+│   ├── Dockerfile.backend          # Root context backend container (backend + ml dependencies)
 │   ├── Dockerfile.backend.dockerignore
-│   ├── Dockerfile.backend.standalone  # ml/-free single-service build
-│   ├── Dockerfile.frontend
-│   ├── docker-compose.yml          # All services — sole compose file
-│   └── nginx.conf                  # Reverse proxy (optional)
+│   ├── Dockerfile.backend.standalone # Legacy standalone scaffold
+│   ├── Dockerfile.frontend         # Next.js multi-stage build container
+│   ├── docker-compose.yml          # Full-stack composition (Postgres, Ollama, Neo4j, Backend, Frontend)
+│   └── nginx.conf                  # Host-networked reverse proxy
 │
 ├── scripts/
-│   ├── setup.sh                    # Install dependencies
-│   ├── run.sh                      # Start all services
-│   ├── run_backend.sh
-│   ├── run_frontend.sh
-│   ├── eval.sh                     # Run evaluation
-│   └── demo.sh                     # Demo walkthrough
+│   ├── setup.sh                    # Shared environment & venv setup
+│   ├── run.sh                      # Full-stack docker compose startup
+│   ├── run_backend.sh              # Local FastAPI runner with Alembic migrations & PYTHONPATH
+│   └── run_frontend.sh             # Local Next.js runner
 │
 ├── data/
-│   ├── demo/
-│   │   ├── patient_1.json          # Sample patients
-│   │   ├── patient_2.json
-│   │   └── patient_3.json
-│   └── benchmarks/
-│       ├── archehr_qa.json         # Evaluation dataset reference
-│       └── medhallbench.json
+│   ├── chroma/                     # Chroma persistent vector store
+│   ├── demo/                       # Demo patient records
+│   ├── benchmarks/                 # Benchmark datasets
+│   └── ingest_manifest.json        # Reference corpus metadata
 │
-├── archive/
-│   └── COMPREHENSIVE_SYNTHESIS.md  # Extended reference (read-only)
-│
+├── archive/                         # Legacy research syntheses (read-only)
 ├── .env.example
 └── .gitignore
 ```
@@ -243,51 +193,22 @@ phire/
 
 ### Varun (ML & Intelligence)
 - `ml/README.md` - Start here: architecture, quick start, model choices, feature status
-- `ml/` - All ML components (RAG, claims, graph, recommendations)
 - `ml/rag/` - Retrieval, reranking, and document/reference ingestion
 - `ml/claims/` - Claim extraction and NLI-based verification
 - `ml/graph/` - Longitudinal Health Graph (Neo4j)
-- `ml/recommendations/` - Fitness and nutrition models (not yet implemented)
+- `ml/recommendations/` - Fitness and nutrition models (research stubs)
 
 ### Anika (Backend Infrastructure)
 - `backend/README.md` - Start here: API surface, architecture, configuration, quick start
-- `backend/` - FastAPI application, all server logic
-- `docker/` - All containerization
-- `scripts/` - Setup and run scripts
+- `backend/` - FastAPI application, routers, database schemas, services
+- `docker/` - Containerization and orchestration
+- `scripts/` - Setup and execution scripts
 
 ### Shashwati (Frontend & Evaluation)
-- `docs/FRONTEND_HANDOFF.md` - Start here: what's built in backend/ml, how to run the stack, gotchas
+- `docs/FRONTEND_HANDOFF.md` - Frontend UI architecture, page inventory, and active tasks
 - `docs/API_REFERENCE.md` - Full request/response reference for every endpoint
-- `frontend/` - Next.js application, UI components
-- `evaluation/` - All metrics and benchmarking
-- `evaluation/results/` - Metrics output, figures for paper
-- `evaluation/notebooks/` - Analysis and statistical testing
-
----
-
-## 🚀 Initialization
-
-```bash
-# Clone and setup
-git clone https://github.com/varunaditya27/PHIRE.git
-cd PHIRE
-
-# Copy environment templates
-cp .env.example .env
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-
-# Install & run all services
-bash scripts/setup.sh
-bash scripts/run.sh
-```
-
-All services start:
-- Backend: http://localhost:8000
-- Frontend: http://localhost:3000
-- Ollama: http://localhost:11434
-- PostgreSQL: localhost:5432
-- Chroma: http://localhost:8100 (if using container)
+- `frontend/` - Next.js application, UI components, API client
+- `evaluation/` - Metrics, benchmarks, analysis (scheduled for evaluation phase)
 
 ---
 
@@ -295,31 +216,11 @@ All services start:
 
 | Folder | Owner | Responsibility |
 |--------|-------|---|
-| `backend/` | Anika | All FastAPI routes, models, database |
-| `frontend/` | Shashwati | All Next.js pages, components, styling |
-| `ml/` | Varun | RAG, claims, embeddings, recommendations |
-| `evaluation/` | Shashwati | Metrics, benchmarks, analysis |
-| `docker/` | Anika | Containerization, orchestration |
+| `backend/` | Anika | All FastAPI routes, models, database, services |
+| `frontend/` | Shashwati | Next.js pages, components, styling, UI client |
+| `ml/` | Varun | RAG, claims, graph, embeddings, chains, tests |
+| `evaluation/` | Shashwati | Metrics, benchmarks, analysis (upcoming) |
+| `docker/` | Anika | Containerization, orchestration, Nginx |
 | `scripts/` | Anika | Setup and execution scripts |
-| `data/` | All | Demo data, shared benchmarks |
+| `data/` | All | Demo data, shared benchmarks, vector store |
 | `docs/` | All | Documentation (everyone contributes) |
-
----
-
-## 🚨 Communication Points
-
-**Varun ↔ Anika**:
-- Anika's `/api/observations` endpoint → Varun's RAG context
-- Varun's `/api/chat` response format (claims + evidence) → Anika's backend integration
-
-**Varun ↔ Shashwati**:
-- Varun's structured claims/evidence → Shashwati's evaluation metrics
-- Shashwati's ablation results → Varun's prompt/model tuning
-
-**Anika ↔ Shashwati**:
-- Anika's FastAPI backend APIs → Shashwati's frontend integration
-- Anika's raw data access → Shashwati's evaluation scripts
-
----
-
-**Status**: `ml/` (RAG, claims, graph) implemented per the tree above; `backend/`, `frontend/`, `evaluation/` structure below is the planned layout, not yet built out — see each folder's own state before assuming this tree is current outside `ml/`.

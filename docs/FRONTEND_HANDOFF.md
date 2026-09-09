@@ -1,134 +1,87 @@
-# Frontend Handoff: what's built in `backend/` + `ml/`, and what you need to know
+# Frontend Handoff: Architecture, Implemented UI, and Integration Guide
 
-**Audience**: Shashwati (`frontend/`, `evaluation/`). This is a snapshot of
-`backend/` + `ml/` as of 2026-08-28 (`origin/backend` branch) — what's
-live, how to call it, what infrastructure you need running, and what's
-still rough. Written so you can start `frontend/` without reading
-`backend/app/` or `ml/` first. For the exact request/response shape of
-every endpoint, see **[docs/API_REFERENCE.md](API_REFERENCE.md)** — this
-doc is the narrative map, that one is the contract.
-
-**Status of this doc**: accurate as of the commits on `origin/backend`
-through the review/fix pass described in `CHANGELOG.md`'s `[0.4.0]`. If
-`backend/`/`ml/` change after this, treat this as a starting map, not a
-live contract — check `docs/API_REFERENCE.md` or the actual router code
-for anything you're about to depend on precisely.
-
-**No frontend code exists yet** — `frontend/` is still the unmodified
-`create-next-app` scaffold (Next.js 16, React 19, Tailwind 4). Everything
-below is what you're building against from a clean slate, not a migration.
+**Audience**: Shashwati (`frontend/`, `evaluation/`) & Frontend Maintainers.  
+**As of**: 2026-09-03 (Frontend V1 Implemented on `main`).  
+**Status**: The Next.js UI is fully built with Dashboard, Chat, Document Ingestion, and Search views. This document maps the architecture, live routes, data flows, and active backlog items.
 
 ---
 
-## 1. Get the stack running
+## 1. Quick Start & Local Development
 
-You need Postgres + Ollama + Neo4j + backend reachable at
-`http://localhost:8000` before frontend can do anything real.
-
-**Fastest path (Docker, full stack):**
+### Running the Stack
+Ensure the backend services (PostgreSQL, Ollama, Neo4j, FastAPI) are running at `http://localhost:8000`:
 ```bash
-cp .env.example .env && cp backend/.env.example backend/.env
-scripts/run.sh   # docker compose -f docker/docker-compose.yml up -d --build
-docker compose -f docker/docker-compose.yml exec ollama ollama pull medgemma:4b
-docker compose -f docker/docker-compose.yml exec ollama ollama pull qwen3.5:9b
-curl -X POST http://localhost:8000/api/health   # confirm all four deps are true
-```
-See [backend/README.md](../backend/README.md) and
-[docs/BACKEND_HANDOFF.md §8](BACKEND_HANDOFF.md) for the non-Docker path
-and platform caveats (host networking is Linux-native; Docker Desktop
-Mac/Windows needs a beta opt-in).
+# Terminal 1: Backend
+bash scripts/run_backend.sh
 
-**Frontend dev server**, once the backend's up:
-```bash
+# Terminal 2: Frontend
 cd frontend
 npm install
-echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local   # doesn't exist yet -- create it
-npm run dev   # http://localhost:3000
+npm run dev   # Runs on http://localhost:3000
 ```
-Backend's CORS (`CORS_ORIGINS` in `backend/.env`) already defaults to
-`http://localhost:3000`, so a default `npm run dev` should just work
-against a locally running backend with no config changes on either side.
 
-**No seed/demo patient data ships yet.** To have anything to render, either
-upload a real PDF/PNG/JPEG lab report through `POST /api/documents/upload`
-yourself, or ask Varun/Anika for a synthetic one — `docs/BACKEND_HANDOFF.md
-§7` used a PyMuPDF-generated fixture for testing, not committed to the
-repo.
+### Environment Configuration
+- Default `NEXT_PUBLIC_API_URL` is `http://localhost:8000`.
+- Override by placing `NEXT_PUBLIC_API_URL=http://localhost:8000` in `frontend/.env.local`.
+- Backend CORS (`CORS_ORIGINS` in `backend/.env`) defaults to `["http://localhost:3000"]`.
 
 ---
 
-## 2. What's actually there to build against
+## 2. Implemented Pages & UI Inventory
 
-All 8 routers are wired to real implementations (not mocks/stubs), and
-have been live-tested end-to-end against real Postgres/Neo4j/Chroma/Ollama
-(`docs/BACKEND_HANDOFF.md §7`) — full detail in
-[docs/API_REFERENCE.md](API_REFERENCE.md):
-
-| Feature | Endpoint(s) | Notes |
+| Route | File Path | Description & Features |
 |---|---|---|
-| Chat (evidence-attributed Q&A) | `POST /api/chat` | Blocking, no streaming — multi-second latency is normal |
-| Document upload/ingestion | `POST /api/documents/upload`, `POST /api/documents/{id}/process`, `GET /api/documents/{id}` | Async — poll for status |
-| Structured patient data | `GET /api/observations`, `GET /api/timeline` | Backed by the Neo4j graph, not Postgres |
-| Evidence search/verify | `GET /api/search/evidence`, `POST /api/evidence/retrieve`, `POST /api/evidence/verify` | |
-| Claim extraction (standalone) | `POST /api/claims/extract` | Rarely called directly — `/api/chat` does this internally |
-| Health check | `POST /api/health` | Good for a system-status indicator |
-| Recommendations | `GET /api/recommendations/fitness`, `/nutrition` | **Not usable yet — always 501**, see below |
-
-### What's genuinely not ready
-- **Recommendations (fitness + nutrition) are stubs.** Both return `501`
-  unconditionally — `ml/recommendations/` has no `recommend()` function
-  yet. Don't build UI that expects real data here; a "coming soon" state
-  or feature-flagged-off is the honest option today.
-- **No pytest suite** on `backend/` or a frontend test harness yet —
-  verification so far is live manual integration testing.
+| **`/` (Dashboard)** | [`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx) | **Patient Overview & Health Timeline**: Fetches `GET /api/timeline` and `GET /api/observations`. Renders multi-series Recharts line graphs for numeric lab metrics and a recent observations feed. |
+| **`/chat` (Medical Chat)** | [`frontend/app/chat/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/chat/page.tsx) | **Evidence-Attributed Assistant**: Multi-turn chat interface calling `POST /api/chat`. Features expandable per-claim audit trails with NLI status badges (`SUPPORTED`, `DERIVED`, `CONFLICTING`, `UNSUPPORTED`), confidence percentages, and source file citations. |
+| **`/documents` (Ingestion)** | [`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx) | **Document Uploader**: Drag-and-drop file uploader (PDF, PNG, JPEG) up to 25MB calling `POST /api/documents/upload`. Live polling against `GET /api/documents/{id}` for `processing`, `processed`, or `failed` status. |
+| **`/search` (Explorer)** | [`frontend/app/search/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/search/page.tsx) | **Evidence & Claim Explorer**: Tab 1 executes hybrid search via `GET /api/search/evidence`. Tab 2 allows direct NLI claim verification via `POST /api/evidence/verify`. |
 
 ---
 
-## 3. Things that will bite you if you don't know them going in
+## 3. Design System & Tokens
 
-- **No streaming.** `/api/chat` returns one JSON blob once the whole
-  pipeline (retrieve → generate → extract claims → verify each → score)
-  finishes — expect several real seconds, not a fast API call. Build a
-  loading state, not a token-by-token typing effect (there's nothing to
-  stream from).
-- **IDs are inconsistent by design.** `Document`/`Claim`/`ChatMessage` ids
-  are real UUIDs (Postgres rows). `Observation` ids and evidence-citation
-  ids (`evidence_passage_id`, `document_id` on those two) are
-  content-derived **strings** from `ml/`'s Neo4j graph / Chroma store —
-  don't assume every `id` field is UUID-shaped, and don't try to look one
-  up as a Postgres row.
-- **`ChatResponse.citations` is declared but always empty today.** Use
-  `claims[].source_filename` / `source_url` / `source_span` instead for
-  citation rendering — see `docs/API_REFERENCE.md`'s Chat section.
-- **The chat answer is pre-filtered.** `answer` only reflects claims that
-  passed verification above the confidence threshold; if nothing did,
-  you get a fixed abstention message. Still render `claims` even then —
-  it's the audit trail of what was checked (including rejected claims),
-  which is PHIRE's whole evidence-attribution pitch. Don't hide it.
-- **Document processing has no push notification.** After upload, poll
-  `GET /api/documents/{id}` yourself; there's no websocket/SSE for
-  status changes.
-- **A chat request and a document upload can make each other visibly
-  slower**, not error. The backend serializes GPU-heavy work (chat
-  generation vs. document ingestion) server-side to avoid an out-of-memory
-  crash on the dev GPU — if you send a chat message while a document is
-  mid-ingestion, it'll just wait its turn. Don't interpret a slow response
-  in that situation as a bug.
-- **Single patient, no auth, no `patient_id` anywhere.** PHIRE runs one
-  instance per person by design — there's no login flow or per-user
-  scoping to build.
+Defined in [`frontend/app/globals.css`](file:///home/varun/Projects/PHIRE/frontend/app/globals.css) and [`DESIGN.md`](file:///home/varun/Projects/PHIRE/DESIGN.md):
+- **Color Palette**:
+  - `Canvas`: `--background` (`#FAF8F5` light / `#18181B` dark)
+  - `Surface`: `--card` (`#FFFFFF` light / `#27272A` dark)
+  - `Accent / Ochre`: `--primary` (`#96742A` light / `#D4AF37` dark)
+  - `Evidence / Slate`: `var(--evidence)` (`#3B5B6D` light / `#6895AC` dark)
+  - `Positive / Oxide Green`: `var(--positive)` (`#2B6E4E` light / `#4ADE80` dark)
+  - `Danger / Oxide Red`: `var(--danger)` (`#8C3F2B` light / `#F87171` dark)
+- **Typography Pairings**:
+  - Body: `IBM Plex Sans` (`var(--font-sans)`)
+  - Headings / Editorial: `Newsreader` (`var(--font-editorial)`)
+  - Numerical metrics / IDs / Spans: `IBM Plex Mono` (`var(--font-mono)`)
 
 ---
 
-## 4. Who to ask
+## 4. API Client & Data Models (`frontend/lib/api.ts`)
 
-- **API contract questions, endpoint bugs**: Anika (`backend/`) —
-  `docs/BACKEND_HANDOFF.md` has the full integration history if you want
-  the "why" behind a shape before asking.
-- **Answer quality, claim verification behavior, recommendation
-  timeline**: Varun (`ml/`) — `ml/README.md` covers what's implemented
-  there.
-- Cross-cutting API contract changes (anything that would change a
-  response shape you're already relying on) should be a heads-up to
-  whoever owns that endpoint before it ships, not a silent change — see
-  the root `CLAUDE.md`/`REPO_STRUCTURE.md`'s ownership table.
+The frontend communicates with the backend exclusively via typed wrappers in [`frontend/lib/api.ts`](file:///home/varun/Projects/PHIRE/frontend/lib/api.ts):
+- `api.health.check()`: Calls `POST /api/health`
+- `api.health.ping()`: Calls `GET /api/ping`
+- `api.chat.send(message)`: Calls `POST /api/chat`
+- `api.documents.upload(file)`: Streams `multipart/form-data` to `POST /api/documents/upload`
+- `api.documents.get(id)`: Polls `GET /api/documents/{id}`
+- `api.observations.list(params)`: Calls `GET /api/observations`
+- `api.timeline.get()`: Calls `GET /api/timeline`
+- `api.evidence.search(query, top_k)`: Calls `GET /api/search/evidence`
+- `api.evidence.verify(claim)`: Calls `POST /api/evidence/verify`
+- `api.claims.extract(text)`: Calls `POST /api/claims/extract`
+
+---
+
+## 5. Active Frontend Work Items & Gaps
+
+1. **Fix `EvidenceCitation.score` in Search**:
+   Backend `chunk_to_citation()` leaves `score` as `None`, causing `frontend/app/search/page.tsx` to display `0.0%`. Pass score through in backend service.
+2. **Remove `localStorage` Workaround for Documents**:
+   Currently, `frontend/app/documents/page.tsx` caches document IDs in browser `localStorage`. Once backend exposes `GET /api/documents`, switch to fetching the full document list directly on component mount.
+3. **Add Chat History Rehydration**:
+   Implement a chat message list fetch on mount in `frontend/app/chat/page.tsx` once backend exposes `GET /api/chat/messages`.
+4. **Remove Redundant Ingestion Call**:
+   Remove `api.documents.process(res.id)` in `frontend/app/documents/page.tsx:L98` since backend `/upload` already enqueues background processing automatically.
+5. **Type Alignment**:
+   Update `Claim.source_span` to `[number, number] | null` and `ObservationRead.value` to `string | null` in `frontend/lib/api.ts`.
+6. **Observation Status Badges**:
+   Display medication and condition statuses (e.g. `"active"`, `"continued"`) as pill badges in `frontend/app/page.tsx`.

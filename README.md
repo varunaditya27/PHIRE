@@ -8,23 +8,23 @@ PHIRE helps users understand their personal health data through an AI assistant 
 - Reasons over years of health history (detects trends, patterns, contradictions)
 - Detects when it's uncertain and abstains (prevents false health information)
 
-**Status**: Core ML pipeline (RAG, claim verification, Longitudinal Health Graph) and `backend` are implemented, wired together, and live-tested end-to-end; `frontend` and extended features are in progress. See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the current checklist and [docs/BACKLOG.md](docs/BACKLOG.md) for known gaps.
+**Status**: Core ML pipeline (RAG, claim verification, Longitudinal Health Graph), FastAPI backend, and Next.js frontend are implemented and wired together. See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for feature alignment, [docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md) for the codebase audit, and [docs/BACKLOG.md](docs/BACKLOG.md) for known gaps.
 
 ---
 
 ## 🎯 What PHIRE Does
 
 ### Core Features (MVP)
-- **Local LLM Chat**: Ask health questions without sending data to cloud
-- **Evidence Attribution**: Every answer shows exactly where information comes from
-- **Longitudinal Analysis**: Understands your health trends over years, not just today
+- **Local LLM Chat**: Ask health questions without sending data to the cloud
+- **Evidence Attribution**: Every answer traces atomic claims to verified records
+- **Longitudinal Analysis**: Understands your health trends over time via graph modeling
 - **Hallucination Detection**: Refuses to guess when evidence is insufficient
-- **Document Processing**: Ingests lab reports, health records, PDFs automatically
+- **Document Processing**: Ingests lab reports, health records, and PDFs automatically
 
 ### Extended Features (Post-MVP)
 - Fitness & nutrition recommendations with ML models
 - Wearable data integration (Fitbit, Oura, Apple Watch)
-- Contradiction detection (alerts when records conflict)
+- Multi-hop graph retrieval and contradiction detection
 - Doctor-preparation summaries for clinical appointments
 - FHIR-compliant health representations
 
@@ -33,24 +33,21 @@ PHIRE helps users understand their personal health data through an AI assistant 
 ## 🏗️ Architecture
 
 ```
-Frontend (Next.js)
+Frontend (Next.js 16 + React 19)
     ↓
-FastAPI Backend (Python)
+FastAPI Backend (Python 3.11+)
     ↓ ↙ ↘
-Ollama     RAG System            ML Models
-(Local     (Chroma vector +      (Recommendations —
- LLM)       BM25 + Neo4j graph)   not yet built)
-    ↓ ↓ ↓ ↓
-PostgreSQL (Patient Data, Timeline, Claims, Evidence)
+Ollama               RAG System                      Neo4j Graph
+(medgemma:4b,        (MedCPT embeddings +            (Longitudinal Health Graph:
+ qwen3.5:9b,          BM25 + Chroma +                 Observations, Timeline,
+ olmOCR-2-7B)         BART-large-MNLI)                Medications, Conditions)
+    ↓
+PostgreSQL (Upload Metadata, Chat History, Claims, Audit Logs)
 ```
 
 RAG is hybrid, not vector-only: lexical (BM25) and semantic (Chroma) search
-handle single-hop lookups; a graph layer (Neo4j, queried directly via
-Cypher — LightRAG was evaluated and not adopted, see
-[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md)) handles
-longitudinal patient facts and trend computation today, with multi-hop
-graph-RAG retrieval as future work (see
-[docs/GRAPH_SCHEMA_ROADMAP.md](docs/GRAPH_SCHEMA_ROADMAP.md)).
+handle passage retrieval, while a local graph layer (Neo4j) stores structured
+patient observations and precomputes trend deltas for arithmetic verification.
 
 **Key design principle**: All data stays local. No cloud APIs, no external LLM calls.
 
@@ -59,7 +56,7 @@ graph-RAG retrieval as future work (see
 ## 🚀 Quick Start
 
 ### Requirements
-- Python 3.10+, Node.js 18+
+- Python 3.11+, Node.js 20+
 - 8GB RAM, GPU optional (NVIDIA GTX 3060+ recommended)
 - Docker & Docker Compose
 - ~20GB disk space (for models + data)
@@ -71,23 +68,23 @@ graph-RAG retrieval as future work (see
 git clone https://github.com/varunaditya27/PHIRE.git
 cd PHIRE
 
-# Setup environment
+# Setup environment & dependencies
 cp .env.example .env
 bash scripts/setup.sh
 
-# Start all services (Ollama, FastAPI, Next.js, PostgreSQL, Chroma)
+# Start all services (PostgreSQL, Ollama, Neo4j, Backend, Frontend)
 docker compose -f docker/docker-compose.yml up -d
 
-# Check services running
-curl http://localhost:8000/health
+# Verify system health
+curl -X POST http://localhost:8000/api/health
 ```
 
 ### First Use
 
-1. **Upload health data**: Upload a PDF lab report via the UI
-2. **Ask a question**: "What's my latest LDL level?"
-3. **See evidence**: Click on the answer to see exact source highlighted
-4. **Build timeline**: System automatically creates your health timeline
+1. **Dashboard**: Navigate to `http://localhost:3000` to see your health overview.
+2. **Upload Records**: Go to `http://localhost:3000/documents` and upload a PDF or scanned lab report.
+3. **Ask Questions**: Open `http://localhost:3000/chat` and ask "What was my most recent LDL level?".
+4. **Inspect Evidence**: Expand the Claim Verification audit trail to view exact confidence scores and source citations.
 
 ---
 
@@ -97,17 +94,17 @@ curl http://localhost:8000/health
 - [x] Local LLM inference (Ollama, medgemma:4b)
 - [x] Hybrid retrieval (BM25 + Chroma semantic search, MedCPT-reranked)
 - [x] Evidence attribution (claim-level, with exact source spans)
-- [x] Claim verification / hallucination detection (NLI-based, abstains below confidence threshold)
+- [x] Claim verification / hallucination detection (BART-large-MNLI, abstains below confidence threshold)
 - [x] Longitudinal reasoning (Neo4j-backed patient fact graph: current state + trend deltas)
-- [x] Document ingestion (text PDFs + scanned/photographed documents via OCR)
-- [ ] Backend API integration (`backend/` wiring to `ml/`)
-- [ ] Frontend chat UI
+- [x] Document ingestion (text PDFs + scanned/photographed documents via olmOCR)
+- [x] Backend API integration (FastAPI with 8 routers, HIPAA audit logging, GPU lock)
+- [x] Frontend UI (Next.js 16 App Router: Dashboard, Chat, Documents, Search)
 
 **Extended (post-core)**
-- [ ] Fitness recommendations
-- [ ] Nutrition recommendations
+- [ ] Fitness recommendations (HAR model)
+- [ ] Nutrition recommendations (meal planner)
 - [ ] Wearable integration
-- [ ] Multi-hop graph-RAG retrieval (LightRAG-style, beyond today's single-patient fact lookups)
+- [ ] Multi-hop graph-RAG retrieval
 - [ ] FHIR-compliant representation
 
 See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete feature checklist.
@@ -116,39 +113,36 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: Next.js 14, React, TypeScript
-- **Backend**: FastAPI, Python 3.10+
-- **LLM**: Ollama + medgemma:4b (chat), qwen3.5:9b (prose fact extraction), olmOCR-v2 (scanned/photographed document OCR) — all benchmarked, see `ml/*/experiments/RESULTS.md`
-- **Embeddings / Reranking**: MedCPT (dual encoder + cross-encoder)
-- **Claim verification**: BART-large-MNLI (NLI-based entailment/contradiction scoring)
+- **Frontend**: Next.js 16, React 19, TypeScript, TailwindCSS, Lucide Icons, Recharts
+- **Backend**: FastAPI, Python 3.11+, SQLAlchemy, Alembic, PostgreSQL
+- **LLM**: Ollama (`medgemma:4b` for chat, `qwen3.5:9b` for prose fact extraction, `olmOCR-2-7B` for vision OCR)
+- **Embeddings / Reranking**: `ncbi/MedCPT` (dual encoder + cross-encoder)
+- **Claim verification**: `facebook/bart-large-mnli` (NLI entailment/contradiction scoring)
 - **Vector DB**: Chroma (in-process)
-- **Graph DB**: Neo4j (Community Edition), queried directly via Cypher — for the Longitudinal Health Graph (structured patient facts, trend computation)
-- **Database**: PostgreSQL
-- **ML Models**: PyTorch (transformers) for RAG/claims; recommendation models not yet built
-- **Deployment**: Docker, Docker Compose
+- **Graph DB**: Neo4j (Community Edition 5), queried directly via Cypher
+- **Deployment**: Docker, Docker Compose (host networking for local privacy compliance)
 
 ---
 
 ## 📖 Documentation
 
+- **[docs/CODEBASE_AUDIT.md](docs/CODEBASE_AUDIT.md)** - Comprehensive master audit of features, inconsistencies, bugs, and design decisions
+- **[docs/BACKLOG.md](docs/BACKLOG.md)** - Known gaps, tech debt, and open design questions across all subsystems
+- **[docs/API_REFERENCE.md](docs/API_REFERENCE.md)** - Full request/response reference for every backend endpoint
+- **[docs/FRONTEND_HANDOFF.md](docs/FRONTEND_HANDOFF.md)** - Frontend UI architecture, page inventory, and active tasks
+- **[docs/BACKEND_HANDOFF.md](docs/BACKEND_HANDOFF.md)** - Backend integration history, verification tests, and architecture
+- **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap aligned to NLP-06 specifications
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Roles, work division, detailed task breakdown
 - **[GET_STARTED.md](GET_STARTED.md)** - First-day setup & onboarding checklist
-- **[ml/README.md](ml/README.md)** - `ml/` subsystem: architecture, quick start, model choices, feature status
-- **[backend/README.md](backend/README.md)** - `backend/` subsystem: API surface, architecture, configuration, quick start
-- **[docs/API_REFERENCE.md](docs/API_REFERENCE.md)** - Full request/response reference for every backend endpoint
-- **[docs/FRONTEND_HANDOFF.md](docs/FRONTEND_HANDOFF.md)** - Start here for `frontend/` work: what's built, how to run the stack, gotchas
-- **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap (MVP + extended, aligned to NLP-06)
-- **[docs/AGGRESSIVE_ROADMAP.md](docs/AGGRESSIVE_ROADMAP.md)** - Build checklist: core MVP + extended features
-- **[docs/BACKLOG.md](docs/BACKLOG.md)** - Known gaps, tech debt, and open design questions across ml/backend/frontend
-- **[docs/OPEN_SOURCE_TOOLS.md](docs/OPEN_SOURCE_TOOLS.md)** - 40+ open-source tools & integration guide
-- **[docs/DATASETS_AND_GRAPH_RAG.md](docs/DATASETS_AND_GRAPH_RAG.md)** - Finalized fitness/nutrition datasets, model choices, and the hybrid vector + graph RAG architecture
+- **[ml/README.md](ml/README.md)** - `ml/` subsystem architecture, benchmarks, and model selection
+- **[backend/README.md](backend/README.md)** - `backend/` subsystem configuration and quick start
 - **[REPO_STRUCTURE.md](REPO_STRUCTURE.md)** - Repository layout & folder ownership
 
 ---
 
 ## 🔬 Research & Publication
 
-**Research Questions** (addressed by this project):
+**Research Questions**:
 1. Can claim-level evidence attribution reduce hallucinations in local healthcare LLMs?
 2. Does structured temporal representation improve trend reasoning accuracy?
 3. Can explicit verification reduce unsupported medical claims by 40%+?
@@ -159,7 +153,6 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 - Paper 2 (Month 8): Hallucination detection + privacy-utility trade-offs
 - Target venues: ACL, EMNLP, NeurIPS, Medical AI conferences
 
-
 ---
 
 ## 🤝 Contributing
@@ -168,12 +161,6 @@ PHIRE is built by a 3-person team with parallel workstreams:
 - **Varun**: ML & Intelligence (RAG, claims, evidence attribution, recommendations)
 - **Anika**: Backend Infrastructure (FastAPI, Ollama, PostgreSQL, Chroma, Docker)
 - **Shashwati**: Frontend & Evaluation (Next.js UI, metrics, benchmarks, research)
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Development setup
-- Work division & roles
-- How to contribute (bug fixes, features, research)
-- Pull request process
 
 ---
 
@@ -189,20 +176,6 @@ PHIRE is designed for **wellness and decision-support** purposes only:
 - ❌ NOT a replacement for talking to healthcare professionals
 - ❌ NOT for medical emergencies (call 911 or your doctor)
 
-Always consult qualified healthcare professionals for medical decisions. PHIRE is a research project and educational tool.
-
----
-
-## 📋 Research Basis
-
-Every feature in PHIRE is backed by peer-reviewed research (2023-2026):
-- **Evidence attribution / claim verification**: NLI-based entailment/contradiction scoring (BART-large-MNLI, selected via a 129-pair benchmark against 5 other candidates including medical-specialized models — see `ml/claims/experiments/RESULTS.md`); MedRAGChecker was evaluated during tool selection but isn't installable/integrated, see `docs/OPEN_SOURCE_TOOLS.md`
-- **Temporal reasoning**: Longitudinal health reasoning (multiple 2025 papers)
-- **Hallucination detection**: MedHallBench (2025)
-- **Local model deployment**: Privacy-preserving LLM studies (2024-2026)
-- **Evaluation**: ArchEHR-QA benchmark (2026)
-
-
 ---
 
 ## 📚 Citation
@@ -215,17 +188,3 @@ Every feature in PHIRE is backed by peer-reviewed research (2023-2026):
   url={https://github.com/varunaditya27/PHIRE}
 }
 ```
-
----
-
-## 📞 Questions?
-
-- **Setup issues**: Check [GET_STARTED.md](GET_STARTED.md)
-- **How to contribute**: See [CONTRIBUTING.md](CONTRIBUTING.md)
-- **Feature questions**: See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)
-
----
-
-**Built with 🔬 research rigor, 🏥 healthcare focus, 🔒 privacy-first design**
-
-Last updated: 2026-08-26

@@ -3,120 +3,95 @@
 **Status**: Living document. Distinct from `docs/AGGRESSIVE_ROADMAP.md`
 (feature build checklist) — this tracks things that already exist but
 have a known limitation, a deferred fix, or an undecided design question,
-surfaced mostly through code review and live testing rather than planned
-up front. Update this as items are resolved or new ones are found; don't
-let it silently go stale.
+surfaced through code review, audits, and live testing. Update this as items are
+resolved or new ones are found; don't let it silently go stale.
 
-**As of**: 2026-08-28, after the `backend/` ↔ `ml/` integration + review
-pass described in `CHANGELOG.md`'s `[0.4.0]`–`[0.5.0]` and
-`docs/BACKEND_HANDOFF.md`.
+**As of**: 2026-09-03, following the full-codebase audit across `frontend/`, `backend/`, `ml/`, and `docker/`.
 
 ---
 
-## `ml/`
+## 1. `frontend/`
 
-- **`ml/rag/ingest/patient_documents.py`'s `PDFTextExtractor` only handles
-  text-based PDFs.** A scanned PDF (image-only, no embedded text layer)
-  falls through uncaught today. **Design already decided, not yet
-  built** — see `docs/PDF_INGESTION_ROADMAP.md` for the full reasoning
-  and benchmarked approach.
-- **Deterministic table extraction (`build_table_observations`) only
-  recognizes olmOCR's `<table>` HTML output**, not plain pypdf-extracted
-  text tables. For a text-based PDF (the common case — no OCR involved),
-  lab values only reach the graph via prose LLM extraction, not the more
-  reliable deterministic table path. Found live during testing
-  (`docs/BACKEND_HANDOFF.md` §6).
-- **`backend/.env`'s `OCR_MODEL` is silently ignored.**
-  `PROSE_EXTRACTION_MODEL` was wired through in the `[0.5.0]` review pass,
-  but `extract_text()`'s OCR path takes an `extractors` list, not a model
-  string, and nothing constructs a custom one from config yet. Needs
-  `ml/rag/ingest/patient_documents.py`'s extractor interface looked at.
-- **`ml/claims/verifier.py`'s `ClaimVerifier.verify()` runs one NLI
-  forward pass per evidence chunk** instead of batching, unlike
-  `ml/rag/reranker.py`. Adds avoidable GPU latency to every claim
-  verified (every `/api/chat` turn, every `/api/evidence/verify` call).
-  Optimization, not a correctness bug.
-- **`ml/rag/retriever.py`'s in-memory chunk cache can go stale relative
-  to Chroma** if a separate process (e.g. `ml/rag/ingest/run_ingest.py`,
-  run standalone to seed reference sources) writes to the same Chroma
-  store while the backend is already running — `retrieve()` will
-  `KeyError` on an id it doesn't have cached. Mitigation today: restart
-  the backend after any standalone ingestion script. A real fix needs a
-  cache-invalidation design (poll Chroma's own state? a write-through
-  notification?), not just a patch.
-- **`ml/graph/document_dates.py` falls back to today's date** when no
-  clinical date can be extracted from a document — a deliberate,
-  documented tradeoff ("undated is worse than mis-dated for a
-  time-series graph"), reaffirmed (not reversed) during the `[0.5.0]`
-  review. Can make an old, undated document look like the most recent
-  reading in trend calculations. If this bites in practice, the fix
-  needs a real answer to "what does an unknown date mean downstream"
-  (skip the observation entirely? exclude it from trends only, but still
-  show it as a fact?) — not just deleting the fallback.
-- **`ObservationType.SYMPTOM`/`VITAL`** have no dedicated node label in
-  the graph schema (everything numeric is `:Observation`) — filtering to
-  either returns an empty list, not an error. Low-priority unless/until
-  those types are actually populated.
-- **Multi-hop graph-RAG retrieval** (LightRAG-style entity/relationship
-  traversal at query time, for multi-hop/relational/contradiction
-  questions) is planned but not implemented — see
-  `docs/GRAPH_SCHEMA_ROADMAP.md` §3f and `ml/README.md`.
-- **Fitness/nutrition recommendation models are stubs.**
-  `ml/recommendations/` has no `recommend()` function — backend's
-  `/api/recommendations/*` endpoints permanently return `501` until this
-  is built. PAMAP2-based HAR model work hasn't started.
-- Deferred clinical-KG schema work (ontology mapping, provenance-as-edges,
-  and more) has its own trigger-condition-based backlog — see
-  `docs/GRAPH_SCHEMA_ROADMAP.md`, don't duplicate it here.
+- **`frontend/` V1 is implemented** (Next.js 16, React 19, TailwindCSS) with Dashboard (`/`), Medical Chat (`/chat`), Document Ingestion (`/documents`), and Search & Claim Explorer (`/search`).
+- **`EvidenceCitation.score` evaluates to `0.0%` in Search UI**:
+  `backend/app/services/citations.py:chunk_to_citation()` does not set `score` on `EvidenceCitation` (defaults to `None`), causing `frontend/app/search/page.tsx` to calculate `(null * 100).toFixed(1) => 0.0%`.
+- **Document history is isolated to browser `localStorage`**:
+  Because backend has no `GET /api/documents` list endpoint, `frontend/app/documents/page.tsx` caches document IDs in `localStorage`. Clearing browser cache or switching devices loses the document list in the UI even though records exist in PostgreSQL.
+- **Chat conversation does not persist across page reloads**:
+  Chat messages are saved in PostgreSQL `chat_messages` on the backend, but there is no `GET /api/chat/messages` endpoint to rehydrate `frontend/app/chat/page.tsx` upon page load.
+- **Duplicate Document Processing Request**:
+  `POST /api/documents/upload` automatically adds processing to `BackgroundTasks`, but `frontend/app/documents/page.tsx` immediately invokes `POST /api/documents/{id}/process`, frequently receiving `409 Conflict: "Document is already being processed."`.
+- **TypeScript Type Contract Gaps in `frontend/lib/api.ts`**:
+  - `Claim.source_span` is typed as `string | null` instead of `[number, number] | null` (matching backend tuple `[start, end]`).
+  - `ObservationRead.value` and `ObservationRead.observed_date` are typed non-nullable, but backend condition records return `value: null`.
+- **Missing observation status badge**:
+  Condition and medication statuses (e.g. `"active"`, `"continued"`) are not displayed alongside values in `frontend/app/page.tsx`.
+- **No automated test harness** on `frontend/` (Jest/Vitest/Playwright).
 
-## `backend/`
+---
 
-- **No automated test suite.** `ml/` has 189 passing pytest tests
-  (`ml/tests/`); `backend/` has none — verification so far has been live
-  manual integration testing (`docs/BACKEND_HANDOFF.md` §7). Worth
-  building a pytest suite using that manual test sequence as the basis
-  for fixtures, especially before frontend integration makes the API
-  surface harder to change freely.
-- **The `claims` Postgres table is written to (as of `[0.4.0]`) but
-  nothing reads it yet.** It exists so claims are queryable in SQL for
-  evaluation/analytics instead of parsing every `chat_messages.claims`
-  JSON blob — that consumer (an evaluation script, an analytics query)
-  doesn't exist yet. Likely Shashwati's `evaluation/` scope once that
-  starts.
-- **`nginx` proxy profile** was fixed to run host-networked (matching
-  `backend`) in `[0.4.0]`, and `docker compose config` validates it, but
-  it hasn't been live-tested against a real running stack end-to-end —
-  worth a real smoke test before anyone actually relies on it instead of
-  hitting the backend directly on `localhost:8000`.
-- **Caching layer** (reduce repeat-question LLM inference latency) not
-  started — `docs/AGGRESSIVE_ROADMAP.md`'s Integration + Polish phase.
-- **CI/CD** not set up at all yet.
+## 2. `backend/`
 
-## `frontend/`
+- **No automated test suite**:
+  `ml/` has 204 tests (187 passing unit tests + 17 live integration tests) in `ml/tests/`; `backend/` has zero automated tests. A pytest suite with fixtures for all 8 routers is needed.
+- **Missing document listing endpoint (`GET /api/documents`)**:
+  Needed to query `documents` rows from PostgreSQL to support multi-device/refreshable document management in the frontend.
+- **Missing chat history endpoint (`GET /api/chat/messages`)**:
+  Needed to serve past conversation turns with attached claims to the frontend chat UI.
+- **`claims.chat_message_id` Foreign Key lacks an index**:
+  `backend/app/database/schemas.py` and Alembic migrations have FK constraints on `claims.chat_message_id`, but lack an explicit database index.
+- **`nginx` proxy profile**:
+  Runs host-networked matching `backend`, but has not been smoke-tested end-to-end under high-concurrency traffic.
+- **The `claims` Postgres table is written to but lacks dedicated analytics endpoints**:
+  Claims are queryable via SQL for research evaluation, but no specialized evaluation query router exists yet.
+- **Caching layer**:
+  Response caching for repeat identical queries has not been implemented.
 
-- **Nothing built yet** — `frontend/` is still the unmodified
-  `create-next-app` scaffold. `docs/FRONTEND_HANDOFF.md` and
-  `docs/API_REFERENCE.md` are the starting point once work begins.
-- No test harness (parallel to `backend/`'s gap above).
-- Chat UI with clickable evidence highlights, health timeline
-  visualization, demo personas / end-to-end workflow testing — all
-  `docs/AGGRESSIVE_ROADMAP.md` checklist items, none started.
+---
 
-## Cross-cutting / needs a team decision, not just an owner
+## 3. `ml/`
 
-- **ArchEHR-QA 2026 evaluation (167 expert cases) hasn't started.**
-  Shashwati's scope per `REPO_STRUCTURE.md`; `evaluation/` doesn't exist
-  in the repo yet. No baseline metrics (evidence attribution
-  precision/recall, hallucination rate, response latency) have been
-  measured yet either — needed for the research-paper angle
-  (`docs/FEATURES_ALIGNED.md`'s research contributions section), not
-  just as a nice-to-have.
-- **Docker host networking is Linux-native; Docker Desktop (Mac/Windows)
-  needs a beta opt-in (4.29+).** Fine for Varun's dev box — if any
-  teammate develops on Mac/Windows, this needs a real decision (require
-  the beta opt-in? support the non-Docker local-run path as the primary
-  path on those platforms?), not just a caveat in the docs.
-- **Wearable integration (Fitbit, Oura, Apple Health) and computer
-  vision (food recognition, exercise posture)** are Month 2+ per
-  `docs/AGGRESSIVE_ROADMAP.md`'s extended phases — untouched, no design
-  work done yet.
+- **`PDFTextExtractor` only handles text-based PDFs**:
+  A scanned PDF (image-only, no embedded text layer) extracts as empty string today. The designed RapidOCR + `pypdf` router with PyMuPDF rasterization ([`docs/PDF_INGESTION_ROADMAP.md`](PDF_INGESTION_ROADMAP.md)) is pending implementation.
+- **Deterministic table extraction (`build_table_observations`) only recognizes olmOCR's `<table>` HTML**:
+  Plain `pypdf`-extracted text tables are not recognized deterministically; lab values from text PDFs only reach the graph via prose LLM extraction (`qwen3.5:9b`).
+- **`ClaimVerifier.verify()` unbatched sequential inference**:
+  `ml/claims/verifier.py` runs one BART-large-MNLI forward pass per evidence chunk sequentially ($O(\text{claims} \times \text{evidence})$), creating high latency on turns with numerous claims. Needs tensor batching.
+- **Compound metrics omission (e.g. Blood Pressure)**:
+  `ml/graph/observations.py:_split_value()` explicitly rejects compound strings like `"148/92 mmHg"` returning `(None, None)` to prevent corruption, which omits blood pressure from numeric timeline charts and trend computations.
+- **USDA Key-Value NLI false uncertainty**:
+  Terse key-value USDA reference text (`"Fish, salmon... per 100g: Protein 24.6 g"`) fails natural-language NLI entailment against conversational claims (`"Salmon is high in protein"` scores 0.301 entailment), causing false `UNCERTAIN` abstentions.
+- **`ml/rag/retriever.py` in-memory chunk cache staleness**:
+  If a standalone ingestion script writes to Chroma while the backend is running, the in-memory cache may miss chunks.
+- **`ml/graph/document_dates.py` falls back to today's date**:
+  When no clinical date can be extracted from a document, it defaults to `date.today()`, which can make an old undated document appear as the latest reading.
+- **Multi-hop graph-RAG retrieval** is planned but unbuilt (see [`docs/GRAPH_SCHEMA_ROADMAP.md`](GRAPH_SCHEMA_ROADMAP.md)).
+- **Fitness & Nutrition recommendation models are stubs**:
+  `ml/recommendations/` modules contain research notes only. Backend endpoints return `501 Not Implemented`.
+
+---
+
+## 4. `docker/` & Infrastructure
+
+- **`docker/Dockerfile.backend.standalone` is broken**:
+  Builds from `backend/` only and installs only `backend/requirements.txt`. Crashes with `ModuleNotFoundError: No module named 'ml'` on startup because backend strictly requires `ml/`.
+- **`docker/Dockerfile.backend` lacks automated startup migrations**:
+  Does not run `alembic upgrade head` in its `CMD`, leaving a fresh Docker PostgreSQL instance without tables until manually migrated.
+- **`docker/Dockerfile.frontend` missing build argument**:
+  Does not declare `ARG NEXT_PUBLIC_API_URL` before `npm run build`, preventing runtime API URL customization in containerized production builds.
+- **Missing GPU pass-through in `docker/docker-compose.yml`**:
+  Lacks GPU device reservations for `ollama` and `backend`, running inference on CPU inside containers unless configured.
+- **Missing repository scripts**:
+  `scripts/eval.sh` and `scripts/demo.sh` (listed in `REPO_STRUCTURE.md`) do not exist on disk.
+- **Docker Host Networking Platform Nuance**:
+  Host networking (`network_mode: host`) is Linux-native. macOS and Windows Docker Desktop require version 4.29+ with host-networking beta enabled.
+
+---
+
+## 5. Cross-Cutting & Research
+
+- **ArchEHR-QA 2026 evaluation (167 expert cases) not started**:
+  `evaluation/` directory does not exist in the repository yet.
+- **Single-Patient Architecture**:
+  The system is designed for single-user local deployment (`DEFAULT_PATIENT_ID = "self"`). No authentication or multi-patient scoping exists across APIs or database schemas.
+- **Wearable integration and computer vision** (food recognition, posture analysis) are scheduled for Month 2+ per [`docs/FEATURES_ALIGNED.md`](FEATURES_ALIGNED.md).
