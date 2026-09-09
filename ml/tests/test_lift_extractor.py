@@ -7,7 +7,8 @@ import pytest
 import torch
 
 from ml.rag.ingest.lift_extractor import LiftExtractor, SUPPORTED_EXTENSIONS
-from ml.rag.ingest.lift_schema import validate_lift_payload
+from ml.rag.ingest.lift_schema import CLINICAL_DOCUMENT_SCHEMA, validate_lift_payload
+
 
 
 def test_supported_extensions():
@@ -76,6 +77,23 @@ def test_unsupported_file_extension_raises(tmp_path):
         extractor.extract(dummy_file)
 
 
+def test_nonexistent_file_raises_file_not_found(tmp_path):
+    missing_file = tmp_path / "missing.pdf"
+    extractor = LiftExtractor()
+
+    with pytest.raises(FileNotFoundError, match="File not found"):
+        extractor.extract(missing_file)
+
+
+def test_nonexistent_file_raises_file_not_found_even_in_mock_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("PHIRE_MOCK_LIFT", "true")
+    missing_file = tmp_path / "missing.pdf"
+    extractor = LiftExtractor()
+
+    with pytest.raises(FileNotFoundError, match="File not found"):
+        extractor.extract(missing_file)
+
+
 def test_get_model_raises_import_error_when_lift_not_installed():
     extractor = LiftExtractor()
     # lift is not installed in the environment
@@ -86,7 +104,7 @@ def test_get_model_raises_import_error_when_lift_not_installed():
 
 
 def test_get_model_cuda_vs_cpu_branches():
-    extractor = LiftExtractor()
+    extractor = LiftExtractor(model_id="datalab-to/lift")
     mock_inference_manager = MagicMock()
     lift_mod = types.ModuleType("lift")
     lift_model_mod = types.ModuleType("lift.model")
@@ -94,20 +112,32 @@ def test_get_model_cuda_vs_cpu_branches():
     lift_mod.model = lift_model_mod
 
     with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
-        # When CUDA is not available:
+        # When CUDA is not available: CPU mode without BitsAndBytesConfig
         with patch.object(torch.cuda, "is_available", return_value=False):
             extractor._model = None
             m = extractor._get_model()
             assert m is mock_inference_manager.return_value
-            mock_inference_manager.assert_called_with(method="hf")
+            mock_inference_manager.assert_called_with(
+                method="hf",
+                model_name="datalab-to/lift",
+                device="cpu",
+                torch_dtype=torch.float32,
+            )
 
-        # When CUDA is available:
+        # When CUDA is available: 4-bit NF4 BitsAndBytesConfig
         mock_inference_manager.reset_mock()
         extractor._model = None
         with patch.object(torch.cuda, "is_available", return_value=True):
             m2 = extractor._get_model()
             assert m2 is mock_inference_manager.return_value
-            mock_inference_manager.assert_called_with(method="hf")
+            assert mock_inference_manager.call_count == 1
+            call_kwargs = mock_inference_manager.call_args[1]
+            assert call_kwargs["method"] == "hf"
+            assert call_kwargs["model_name"] == "datalab-to/lift"
+            bnb_cfg = call_kwargs["quantization_config"]
+            assert bnb_cfg.load_in_4bit is True
+            assert bnb_cfg.bnb_4bit_quant_type == "nf4"
+            assert bnb_cfg.bnb_4bit_compute_dtype == torch.float16
 
 
 def test_real_extract_call_flow(tmp_path, monkeypatch):
@@ -137,6 +167,11 @@ def test_real_extract_call_flow(tmp_path, monkeypatch):
             res = extractor.extract(dummy_file)
             assert res["document_type"] == "Blood Test"
             assert res["observations"][0]["name"] == "Glucose"
+            mock_extract_fn.assert_called_once_with(
+                str(dummy_file),
+                CLINICAL_DOCUMENT_SCHEMA,
+                model=extractor._model,
+            )
             mock_empty_cache.assert_called_once()
 
 
@@ -172,6 +207,11 @@ def test_real_extract_result_object_with_extraction_attr(tmp_path, monkeypatch):
             res = extractor.extract(dummy_file)
             assert res["document_type"] == "Image Report"
             assert res["observations"][0]["name"] == "HbA1c"
+            mock_extract_fn.assert_called_once_with(
+                str(dummy_file),
+                CLINICAL_DOCUMENT_SCHEMA,
+                model=extractor._model,
+            )
 
 
 def test_real_extract_raises_runtime_error_on_failure(tmp_path, monkeypatch):
@@ -193,5 +233,10 @@ def test_real_extract_raises_runtime_error_on_failure(tmp_path, monkeypatch):
              patch.object(torch.cuda, "empty_cache") as mock_empty_cache:
             with pytest.raises(RuntimeError, match="Lift extraction failed"):
                 extractor.extract(dummy_file)
+            mock_extract_fn.assert_called_once_with(
+                str(dummy_file),
+                CLINICAL_DOCUMENT_SCHEMA,
+                model=extractor._model,
+            )
             mock_empty_cache.assert_called_once()
 

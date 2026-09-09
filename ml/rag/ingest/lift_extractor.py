@@ -44,11 +44,36 @@ class LiftExtractor:
             )
 
         if torch.cuda.is_available():
-            # In CUDA mode: 4-bit NF4 quantization
-            self._model = InferenceManager(method="hf")
+            # In CUDA mode: 4-bit NF4 quantization via BitsAndBytesConfig
+            try:
+                from transformers import BitsAndBytesConfig
+
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_quant_type="nf4",
+                )
+                try:
+                    self._model = InferenceManager(
+                        method="hf",
+                        model_name=self.model_id,
+                        quantization_config=quantization_config,
+                    )
+                except TypeError:
+                    self._model = InferenceManager(method="hf")
+            except (ImportError, Exception):
+                self._model = InferenceManager(method="hf")
         else:
-            # In CPU mode: standard precision, device=cpu
-            self._model = InferenceManager(method="hf")
+            # In CPU mode: standard precision, device=cpu; strictly no BitsAndBytesConfig
+            try:
+                self._model = InferenceManager(
+                    method="hf",
+                    model_name=self.model_id,
+                    device="cpu",
+                    torch_dtype=torch.float32,
+                )
+            except TypeError:
+                self._model = InferenceManager(method="hf")
 
         return self._model
 
@@ -56,6 +81,9 @@ class LiftExtractor:
         """Extract structured clinical JSON from a PDF or image file."""
         if not self.supports(file_path):
             raise ValueError(f"Unsupported file format {file_path.suffix} for Lift extraction.")
+
+        if not file_path.is_file():
+            raise FileNotFoundError(f"File not found: {file_path}")
 
         # Check for fast mock mode (used for testing and CPU development)
         if os.environ.get("PHIRE_MOCK_LIFT", "").lower() in ("1", "true", "yes"):
@@ -66,7 +94,7 @@ class LiftExtractor:
         # Lift's extract interface
         try:
             from lift import extract
-            raw_output = extract(str(file_path), CLINICAL_DOCUMENT_SCHEMA)
+            raw_output = extract(str(file_path), CLINICAL_DOCUMENT_SCHEMA, model=model)
             if hasattr(raw_output, "extraction"):
                 raw_output = raw_output.extraction
         except Exception as exc:
