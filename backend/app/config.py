@@ -38,8 +38,14 @@ class Settings(BaseSettings):
     # --- ml/ model config (read by ml.rag.ingest.ocr / prose_extraction,
     # not by backend code directly -- kept here so a fresh .env has every
     # var ml/ needs, matching ml/.env.example) ---
+    # Deprecated: superseded by lift_model
     ocr_model: str = "olmocr"
     prose_extraction_model: str = "qwen3.5:9b"
+
+    # --- Lift VLM ---
+    lift_model: str = Field(default="datalab-to/lift", validation_alias="LIFT_MODEL")
+    lift_device: str = Field(default="auto", validation_alias="LIFT_DEVICE")
+    phire_mock_lift: bool = Field(default=False, validation_alias="PHIRE_MOCK_LIFT")
 
     # --- Neo4j (ml/graph -- Longitudinal Health Graph) ---
     neo4j_uri: str = "bolt://localhost:7687"

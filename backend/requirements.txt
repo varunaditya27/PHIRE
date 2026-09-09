@@ -27,3 +27,9 @@ cryptography
 # pulled in via ml/requirements.txt, installed alongside this file (see
 # scripts/setup.sh, docker/Dockerfile.backend) -- declaring them here too
 # would just be an unpinned duplicate of ml/'s own pins.
+
+# --- Visual Document Extraction (Lift VLM) ---
+lift-pdf[hf]>=0.1.0
+bitsandbytes>=0.43.0
+accelerate>=0.28.0
+
