@@ -17,12 +17,58 @@ no multi-patient schema to design around yet. Observation ids are stable
 via MERGE rather than duplicating them.
 """
 
+from html.parser import HTMLParser
 import re
 
 from ml.graph.client import GraphClient
 from ml.graph.document_dates import find_document_date
 from ml.graph.metric_resolver import resolve_metric
-from ml.rag.ingest.table_parsing import find_table_blocks, parse_table_rows
+
+_TABLE_RE = re.compile(r"<table>.*?</table>", re.DOTALL)
+
+
+class _TableRowParser(HTMLParser):
+    """Collects <tr> rows (each a list of cell strings) from one table block."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.row_cells: list[list[str]] = []
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag == "tr":
+            self._current_row = []
+        elif tag in ("td", "th"):
+            self._current_cell = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th") and self._current_cell is not None and self._current_row is not None:
+            self._current_row.append("".join(self._current_cell).strip())
+            self._current_cell = None
+        elif tag == "tr" and self._current_row is not None:
+            self.row_cells.append(self._current_row)
+            self._current_row = None
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+
+def find_table_blocks(text: str) -> list[str]:
+    """Return every <table>...</table> substring in text, in document order."""
+    return _TABLE_RE.findall(text)
+
+
+def parse_table_rows(table_html: str) -> list[dict[str, str]]:
+    """Parse one HTML table into a list of header-label -> cell-value dicts."""
+    parser = _TableRowParser()
+    parser.feed(table_html)
+    if not parser.row_cells:
+        return []
+    headers, *data_rows = parser.row_cells
+    return [dict(zip(headers, row)) for row in data_rows]
+
 
 DEFAULT_PATIENT_ID = "self"
 

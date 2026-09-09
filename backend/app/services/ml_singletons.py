@@ -52,6 +52,14 @@ GPU_LOCK = threading.Lock()
 
 
 @lru_cache
+def get_lift_extractor():
+    from ml.rag.ingest.lift_extractor import LiftExtractor
+
+    settings = get_settings()
+    return LiftExtractor(model_id=settings.lift_model)
+
+
+@lru_cache
 def get_retriever():
     from ml.rag.retriever import HybridRetriever
 

@@ -12,11 +12,63 @@ Only the model tag varies per candidate; production only ever uses one
 """
 
 import base64
+import json
+import os
+import re
 from pathlib import Path
 
 import requests
 
-from ml.rag.ingest.ocr import OCR_PROMPT, OLLAMA_HOST, RESPONSE_SCHEMA, extract_text_from_response
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+
+OCR_PROMPT = (
+    "Attached is one page of a document that you must process. Just return the "
+    "plain text representation of this document as if you were reading it "
+    "naturally. Convert equations to LateX and tables to HTML.\n"
+    "If there are any figures or charts, label them with the following markdown "
+    "syntax ![Alt text describing the contents of the figure]"
+    "(page_startx_starty_width_height.png)\n"
+    "Return your output as markdown, with a front matter section on top "
+    "specifying values for the primary_language, is_rotation_valid, "
+    "rotation_correction, is_table, and is_diagram parameters."
+)
+
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "primary_language": {"type": "string"},
+        "is_rotation_valid": {"type": "boolean"},
+        "rotation_correction": {"type": "integer"},
+        "is_table": {"type": "boolean"},
+        "is_diagram": {"type": "boolean"},
+        "natural_text": {"type": "string"},
+    },
+    "required": ["natural_text"],
+}
+
+_FRONT_MATTER_RE = re.compile(r"^---.*?---\s*", re.DOTALL)
+_QUOTED_STRING_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def extract_text_from_response(raw_response: str) -> str:
+    try:
+        parsed = json.loads(raw_response)
+        if isinstance(parsed, dict) and "natural_text" in parsed:
+            return (parsed["natural_text"] or "").strip()
+    except json.JSONDecodeError:
+        pass
+
+    if raw_response.lstrip().startswith("---"):
+        return _FRONT_MATTER_RE.sub("", raw_response, count=1).strip()
+
+    quoted = _QUOTED_STRING_RE.findall(raw_response)
+    if quoted:
+        longest = max(quoted, key=len)
+        for escaped, literal in (('\\n', '\n'), ('\\t', '\t'), ('\\"', '"'), ('\\\\', '\\')):
+            longest = longest.replace(escaped, literal)
+        return longest.strip()
+
+    return raw_response.strip()
 
 
 class OllamaVisionOCRCandidate:
