@@ -1,6 +1,6 @@
 """
 Builds and writes typed Medication records to Neo4j, from
-prose_extraction.py's LLM-based extraction.
+Lift VLM structured visual extraction (or legacy text extraction).
 
 Schema:
     (:Patient {id})-[:HAS_MEDICATION]->(:Medication)-[:FROM_DOCUMENT]->(:Document)
@@ -18,7 +18,7 @@ from ml.graph.observations import DEFAULT_PATIENT_ID
 def build_medications(
     medications: list[dict], document_text: str, document_id: str, effective_date: str | None = None,
 ) -> list[dict]:
-    """Attach a stable id + effective date to raw medication dicts from prose_extraction.extract_facts.
+    """Attach a stable id + effective date to raw medication dicts from structured extraction.
 
     Pass effective_date to skip re-scanning document_text for a date if
     the caller already extracted it (see observations.build_table_observations'

@@ -61,10 +61,12 @@ bash scripts/run_frontend.sh
 - [x] Design claim verification approach — NLI-based (`facebook/bart-large-mnli`)
 - [x] Real RAG chain implemented (`ml/chains/qa_chain.py`)
 - [x] Longitudinal Health Graph implemented in Neo4j (`ml/graph/`)
-- [x] 189 unit & integration tests passing (`ml/tests/`)
+- [x] Unified visual document extraction via `datalab-to/lift` VLM with Option A RAG chunk synthesis
+- [x] 200 unit tests passing (`ml/tests/`)
 
 ### Anika - Backend Infrastructure
-- [x] Ollama + models (`medgemma:4b`, `qwen3.5:9b`, `olmOCR-2-7B`) running locally
+- [x] Ollama + `medgemma:4b` running locally
+- [x] `datalab-to/lift` VLM integrated via `ml_singletons` under `GPU_LOCK`
 - [x] PostgreSQL database setup with SQLAlchemy & Alembic migrations
 - [x] FastAPI application with 8 routers & Pydantic models
 - [x] HIPAA audit logging (dual PostgreSQL & append-only disk log)
@@ -83,7 +85,7 @@ bash scripts/run_frontend.sh
 
 ## 🎯 Key Decisions Already Made
 
-✅ **LLM**: Ollama + `medgemma:4b` (chat), `qwen3.5:9b` (prose fact extraction), `olmOCR-2-7B` (OCR)  
+✅ **LLM & VLM**: Ollama + `medgemma:4b` (chat), `datalab-to/lift` (schema-guided visual document extraction)  
 ✅ **Vector DB**: Chroma (in-process)  
 ✅ **Graph DB**: Neo4j (Community Edition 5), queried directly via Cypher — for the Longitudinal Health Graph (structured patient facts, trend computation)  
 ✅ **Claim Verification**: NLI-based entailment/contradiction scoring (`facebook/bart-large-mnli`)  
@@ -115,6 +117,6 @@ bash scripts/run_frontend.sh
 | Question | Answer |
 |----------|--------|
 | What's the tech stack? | Next.js 16, FastAPI, Ollama, Chroma, Neo4j, PostgreSQL, Docker |
-| Which LLM? | `medgemma:4b` (chat), `qwen3.5:9b` (prose fact extraction), `olmOCR-2-7B` (OCR) |
+| Which LLM / VLM? | `medgemma:4b` (chat via Ollama), `datalab-to/lift` (schema-guided visual document extraction, 9.7B VLM) |
 | How do I know what to do? | `docs/BACKLOG.md` and `docs/CODEBASE_AUDIT.md` have open items |
 | What if I'm blocked? | Check `docs/API_REFERENCE.md` or `docs/FRONTEND_HANDOFF.md` |

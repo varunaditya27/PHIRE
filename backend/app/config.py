@@ -35,10 +35,7 @@ class Settings(BaseSettings):
     ollama_model: str = "medgemma:4b"
     ollama_timeout_seconds: float = 30.0
 
-    # --- ml/ model config (read by ml.rag.ingest.ocr / prose_extraction,
-    # not by backend code directly -- kept here so a fresh .env has every
-    # var ml/ needs, matching ml/.env.example) ---
-    # Deprecated: superseded by lift_model
+    # --- Legacy model config (deprecated; superseded by Lift VLM) ---
     ocr_model: str = "olmocr"
     prose_extraction_model: str = "qwen3.5:9b"
 

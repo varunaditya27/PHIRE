@@ -35,9 +35,8 @@ throw documents at an LLM and ask it to invent a graph").
 
 ## 2. What's actually built and working right now
 
-**Updated 2026-08-26** — everything in this section is shipped and
-live-tested (`ml/graph/`, `ml/rag/ingest/table_parsing.py`), not just
-"in progress" as an earlier pass of this doc said:
+**Updated 2026-09-09** — everything in this section is shipped and
+live-tested (`ml/graph/`, `ml/rag/ingest/lift_schema.py`, `ml/rag/ingest/lift_extractor.py`):
 
 ```
 (:Patient {id: "self"})
@@ -51,19 +50,17 @@ live-tested (`ml/graph/`, `ml/rag/ingest/table_parsing.py`), not just
 ```
 
 FHIR-inspired field names (`code`/`value`/`effective`/`interpretation`)
-are in place, not "in progress" — this is the schema `ml/graph/observations.py`,
-`medications.py`, and `conditions.py` actually write.
+are in place — this is the schema `ml/graph/observations.py`,
+`medications.py`, and `conditions.py` write.
 
-- Deterministic extraction from OCR'd HTML tables (`table_parsing.py`) —
-  the table's own headers *are* the schema, no LLM guessing involved —
-  for Observations only (labs/vitals). Live-tested: 8/8 observations
-  correctly extracted and typed from a real scanned lab panel.
-- **Typed `Medication`/`Condition` nodes**: done. Extracted from free
-  text via schema-constrained LLM extraction (`ml/graph/prose_extraction.py`,
-  qwen3.5:9b) — the hand-rolled-vs-LangExtract benchmark mentioned in an
-  earlier pass of this doc is resolved: hand-rolled won (matched a 27B
-  alternative exactly while running ~13x faster; see
-  `ml/graph/experiments/RESULTS.md`).
+- **Unified Schema-Guided Extraction via `datalab-to/lift`**:
+  Replaces previous fragile regex HTML table parsing and secondary prose LLM passes.
+  `LiftExtractor` extracts `observations` (including `reference_range` and `interpretation`),
+  `medications` (with `dosage`, `frequency`, `status`), and `conditions` (with `status`)
+  directly from document pages in a single pass according to `CLINICAL_DOCUMENT_SCHEMA`.
+- **Entity node generation**: `build_lift_observations`, `build_medications`, and
+  `build_conditions` normalize metrics via `resolve_metric` and clinical dates via
+  `find_document_date`, writing stable-ID nodes to Neo4j via Cypher `MERGE`.
 - **Read path**: `ml/graph/patient_context.py` turns the graph's current
   state into plain-text facts fed to chat generation
   (`get_patient_facts`), a deduplicated "latest value per metric" view

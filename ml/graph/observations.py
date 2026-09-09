@@ -1,8 +1,7 @@
 """
-Builds and writes typed Observation records to Neo4j — from both
-table_parsing.py's deterministic table extraction and
-prose_extraction.py's LLM-based free-text extraction, normalized to the
-same shape before writing.
+Builds and writes typed Observation records to Neo4j — primarily from
+Lift VLM structured visual extraction (build_lift_observations) and
+legacy/table extraction helpers, normalized to the same shape before writing.
 
 Schema (FHIR-inspired field names — code/value/effective/interpretation
 mirror FHIR's Observation resource; see docs/GRAPH_SCHEMA_ROADMAP.md for
@@ -160,7 +159,7 @@ def build_table_observations(
 def build_prose_observations(
     observations: list[dict], document_text: str, document_id: str, effective_date: str | None = None,
 ) -> list[dict]:
-    """Attach a stable id + effective date to raw observation dicts from prose_extraction.extract_facts."""
+    """Attach a stable id + effective date to raw observation dicts from free-text extraction."""
     effective = effective_date if effective_date is not None else find_document_date(document_text)
     result = []
     for obs in observations:

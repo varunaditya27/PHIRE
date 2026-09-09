@@ -96,22 +96,22 @@ def chunk_ocr_text(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> list[str]:
 
     Patient documents mix three content shapes, and a single blanket
     strategy gets at least one wrong:
-    - HTML tables (olmOCR's own prompt asks it to convert tables to HTML)
+    - HTML tables (from OCR or HTML document representations)
       — line-splitting these produces meaningless fragments like
       "<td>5.4 mEq/L</td>" with no label attached (verified live). Parsed
-      structurally instead (table_parsing.py) and flattened to one
+      structurally instead and flattened to one
       self-contained chunk per row.
     - Short label:value lines ("LDL Cholesterol: 162 mg/dL") — verified
       empirically that combining these into one chunk hurts retrieval
       (0.66 vs 0.75 cosine similarity for the same fact, chunked vs not),
       so each line becomes its own chunk.
-    - Prose paragraphs (progress notes, radiology reports) — olmOCR emits
-      these as one continuous string per paragraph with no internal line
-      breaks, so a \\n\\n-delimited block containing no further \\n is
+    - Prose paragraphs (progress notes, radiology reports) — visual/OCR
+      extractors emit these as one continuous string per paragraph with no
+      internal line breaks, so a \n\n-delimited block containing no further \n is
       reliably prose, not a run of short facts, and stays whole.
 
     The distinguishing signal for the second vs. third case is exactly
-    that: within one \\n\\n-delimited block, multiple \\n-separated lines
+    that: within one \n\n-delimited block, multiple \n-separated lines
     means label:value facts; a single line (however long) means prose.
     """
     chunks: list[str] = []
@@ -136,7 +136,7 @@ def locate_chunk_offsets(source_text: str, chunks: list[str]) -> list[tuple[int,
     Searches forward from the end of the previous match, so repeated text
     (e.g. a duplicated header line) resolves to successive occurrences
     instead of the same one repeatedly. Returns None for a chunk that
-    isn't found verbatim — table-row chunks (table_parsing.flatten_row)
+    isn't found verbatim — table-row chunks (flatten_row)
     are reformatted ("Label: Value, ..."), not extracted verbatim, so they
     have no single matching span in source_text; documented gap, not a
     silent wrong answer.

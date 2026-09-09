@@ -33,7 +33,7 @@ resolved or new ones are found; don't let it silently go stale.
 ## 2. `backend/`
 
 - **No automated test suite**:
-  `ml/` has 204 tests (187 passing unit tests + 17 live integration tests) in `ml/tests/`; `backend/` has zero automated tests. A pytest suite with fixtures for all 8 routers is needed.
+  `ml/` has 217 tests (200 passing unit tests + 17 live integration tests) in `ml/tests/`; `backend/` has zero automated tests. A pytest suite with fixtures for all 8 routers is needed.
 - **Missing document listing endpoint (`GET /api/documents`)**:
   Needed to query `documents` rows from PostgreSQL to support multi-device/refreshable document management in the frontend.
 - **Missing chat history endpoint (`GET /api/chat/messages`)**:
@@ -51,10 +51,10 @@ resolved or new ones are found; don't let it silently go stale.
 
 ## 3. `ml/`
 
-- **`PDFTextExtractor` only handles text-based PDFs**:
-  A scanned PDF (image-only, no embedded text layer) extracts as empty string today. The designed RapidOCR + `pypdf` router with PyMuPDF rasterization ([`docs/PDF_INGESTION_ROADMAP.md`](PDF_INGESTION_ROADMAP.md)) is pending implementation.
-- **Deterministic table extraction (`build_table_observations`) only recognizes olmOCR's `<table>` HTML**:
-  Plain `pypdf`-extracted text tables are not recognized deterministically; lab values from text PDFs only reach the graph via prose LLM extraction (`qwen3.5:9b`).
+- **Scanned PDF Fallback Router (RESOLVED)**:
+  - Resolved via `datalab-to/lift` 9.7B parameter VLM integration. The unified visual document extraction pipeline processes both native digital PDFs and scanned/photographed documents directly in a single pass, eliminating the scanned-PDF gap.
+- **Table & Prose Observation Extraction (RESOLVED)**:
+  - Resolved via `CLINICAL_DOCUMENT_SCHEMA` and `LiftExtractor`. The schema-guided visual extraction retrieves lab values, units, reference ranges, flags, medications, and conditions directly into structured JSON, retiring the brittle regex HTML table parser and Ollama `qwen3.5:9b` prose extraction.
 - **`ClaimVerifier.verify()` unbatched sequential inference**:
   `ml/claims/verifier.py` runs one BART-large-MNLI forward pass per evidence chunk sequentially ($O(\text{claims} \times \text{evidence})$), creating high latency on turns with numerous claims. Needs tensor batching.
 - **Compound metrics omission (e.g. Blood Pressure)**:

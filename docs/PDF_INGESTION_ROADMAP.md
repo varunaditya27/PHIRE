@@ -1,9 +1,10 @@
 # Patient PDF ingestion gap: decided design, not yet built
 
-**Status**: Design decided and benchmarked; implementation deferred to a
-future session. This tracks the reasoning so it doesn't need re-deriving —
-contrast with `docs/GRAPH_SCHEMA_ROADMAP.md`'s format, same intent (working
-decision record, not a finished feature).
+> [!NOTE]
+> **SUPERSEDED AS OF 2026-09-09**: This multi-stage router design (pypdf + RapidOCR agreement check + olmOCR-v2 fallback) was formally superseded by the adoption of `datalab-to/lift` (9.7B parameter VLM).
+> `datalab-to/lift` performs unified, single-pass visual document extraction directly from both digital and scanned PDFs as well as image files, rendering OCR disagreement routing obsolete. See [docs/superpowers/specs/2026-09-09-lift-vlm-ocr-integration-design.md](superpowers/specs/2026-09-09-lift-vlm-ocr-integration-design.md) for the active architecture.
+
+**Status**: Historical reference / superseded.
 
 ---
 

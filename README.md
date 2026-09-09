@@ -38,9 +38,10 @@ Frontend (Next.js 16 + React 19)
 FastAPI Backend (Python 3.11+)
     ↓ ↙ ↘
 Ollama               RAG System                      Neo4j Graph
-(medgemma:4b,        (MedCPT embeddings +            (Longitudinal Health Graph:
- qwen3.5:9b,          BM25 + Chroma +                 Observations, Timeline,
- olmOCR-2-7B)         BART-large-MNLI)                Medications, Conditions)
+(medgemma:4b)        (datalab-to/lift VLM +          (Longitudinal Health Graph:
+                      MedCPT embeddings +             Observations, Timeline,
+                      BM25 + Chroma +                 Medications, Conditions)
+                      BART-large-MNLI)
     ↓
 PostgreSQL (Upload Metadata, Chat History, Claims, Audit Logs)
 ```
@@ -57,7 +58,7 @@ patient observations and precomputes trend deltas for arithmetic verification.
 
 ### Requirements
 - Python 3.11+, Node.js 20+
-- 8GB RAM, GPU optional (NVIDIA GTX 3060+ recommended)
+- 8GB RAM, GPU optional (NVIDIA GTX 3060+ recommended; CPU execution fully supported)
 - Docker & Docker Compose
 - ~20GB disk space (for models + data)
 
@@ -93,10 +94,10 @@ curl -X POST http://localhost:8000/api/health
 **Core**
 - [x] Local LLM inference (Ollama, medgemma:4b)
 - [x] Hybrid retrieval (BM25 + Chroma semantic search, MedCPT-reranked)
-- [x] Evidence attribution (claim-level, with exact source spans)
+- [x] Evidence attribution (claim-level, with exact source citations)
 - [x] Claim verification / hallucination detection (BART-large-MNLI, abstains below confidence threshold)
 - [x] Longitudinal reasoning (Neo4j-backed patient fact graph: current state + trend deltas)
-- [x] Document ingestion (text PDFs + scanned/photographed documents via olmOCR)
+- [x] Document ingestion (unified single-pass visual extraction via `datalab-to/lift` 9.7B VLM with 4-bit NF4 on CUDA and CPU fallback)
 - [x] Backend API integration (FastAPI with 8 routers, HIPAA audit logging, GPU lock)
 - [x] Frontend UI (Next.js 16 App Router: Dashboard, Chat, Documents, Search)
 
@@ -115,7 +116,7 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 
 - **Frontend**: Next.js 16, React 19, TypeScript, TailwindCSS, Lucide Icons, Recharts
 - **Backend**: FastAPI, Python 3.11+, SQLAlchemy, Alembic, PostgreSQL
-- **LLM**: Ollama (`medgemma:4b` for chat, `qwen3.5:9b` for prose fact extraction, `olmOCR-2-7B` for vision OCR)
+- **LLM & VLM**: Ollama (`medgemma:4b` for chat), `datalab-to/lift` (9.7B parameter schema-guided VLM for single-pass visual document extraction)
 - **Embeddings / Reranking**: `ncbi/MedCPT` (dual encoder + cross-encoder)
 - **Claim verification**: `facebook/bart-large-mnli` (NLI entailment/contradiction scoring)
 - **Vector DB**: Chroma (in-process)

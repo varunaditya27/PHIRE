@@ -23,11 +23,11 @@ Frontend (Next.js, not yet built)
 FastAPI Backend (backend/app/)
     │ in-process Python imports (NOT HTTP) via app/services/ml_singletons.py
     ▼
-ml/  (Varun's scope — QAChain, HybridRetriever, ClaimExtractor,
+ml/  (Varun's scope — QAChain, HybridRetriever, LiftExtractor,
       ClaimVerifier, GraphClient — all real, all wired)
     │
-    ├──→ Ollama (localhost:11434) — medgemma:4b (chat), qwen3.5:9b (prose
-    │    fact extraction), olmOCR (image OCR)
+    ├──→ Ollama (localhost:11434) — medgemma:4b (chat)
+    ├──→ Lift VLM (in-process / vLLM) — datalab-to/lift (single-pass visual extraction)
     ├──→ Chroma (in-process, shared REPO_ROOT/data/chroma, collection
     │    "phire_evidence") — one physical store, one schema, owned by
     │    ml/rag/retriever.py
@@ -76,8 +76,10 @@ All `ml/` instances are built **once**, lazily, and cached (`app/services/ml_sin
 ## 6. Known gaps / honest limitations
 
 - **`ml/rag/retriever.py`'s in-memory chunk cache can go stale relative to Chroma** if a *separate process* (e.g. `ml/rag/ingest/run_ingest.py`, run standalone to seed reference sources) writes to the same Chroma store while the backend is already running — `HybridRetriever.retrieve()` will `KeyError` on an id it doesn't have cached. Found live during testing (see §7). Not a bug in backend's wiring — it's a real gap in `ml/`'s single-process cache-invalidation design, out of scope to fix here since it's `ml/`'s file. Mitigation: restart the backend after running any standalone ingestion script.
-- **Deterministic table extraction (`build_table_observations`) only recognizes olmOCR's `<table>` HTML output**, not plain pypdf-extracted text tables. For a text-based PDF (the common case — no OCR involved), lab values only reach the graph via prose LLM extraction (`qwen3.5:9b`), not the deterministic table path. Found live during testing; this is `ml/`'s scope, flagged here for visibility.
-- **`backend/.env`'s `OCR_MODEL` is silently ignored.** `document_processor.py` now threads `PROSE_EXTRACTION_MODEL` through to `extract_facts()` (fixed in the review pass — see `CHANGELOG.md`'s `[0.5.0]`), but `extract_text()`'s OCR path (`ml/rag/ingest/patient_documents.py`) takes an `extractors` list, not a model string, and backend never constructs a custom one — changing `OCR_MODEL` in `backend/.env` currently has no effect. Not fixed in this pass; needs `ml/`'s extractor interface looked at first.
+- **Deterministic table extraction & prose LLM extraction replaced by `datalab-to/lift`**:
+  Previously, deterministic table extraction only recognized olmOCR HTML tables while text PDFs required a separate `qwen3.5:9b` LLM pass. Both are now replaced by unified schema-guided extraction via `datalab-to/lift` (9.7B VLM), which extracts observations, reference ranges, flags, medications, and conditions directly into structured JSON in a single pass.
+- **`LIFT_MODEL`, `LIFT_DEVICE`, and `PHIRE_MOCK_LIFT` configuration**:
+  Backend `Settings` now exposes `lift_model`, `lift_device` (`"auto"`, `"cuda"`, `"cpu"`), and `phire_mock_lift` (for offline fast tests), plumbed into `ml_singletons.get_lift_extractor()`.
 - **`ml/claims/verifier.py`'s `ClaimVerifier.verify()` runs one NLI forward pass per evidence chunk** instead of batching like `ml/rag/reranker.py` does — adds avoidable GPU latency to every claim verified (every `/api/chat` turn, every `/api/evidence/verify` call). Found via review, not fixed here — a real optimization opportunity, not a correctness bug.
 - **`ml/graph/document_dates.py` falls back to today's date when no clinical date can be extracted from a document** — a deliberate, documented tradeoff ("undated is worse than mis-dated for a time-series graph"), reaffirmed during the review pass rather than reversed. Can make an old, undated document look like the most recent reading in trend calculations; if this bites in practice, revisit by deciding what "unknown date" should mean downstream (skip the observation? exclude from trends only?) rather than just removing the fallback.
 - **`ObservationType.SYMPTOM`/`VITAL`** have no dedicated node label in `ml/graph`'s schema (everything numeric is `:Observation`) — filtering to either returns an empty list, not an error.
