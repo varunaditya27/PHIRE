@@ -21,8 +21,19 @@ DEFAULT_MODEL_ID = os.environ.get("LIFT_MODEL", "datalab-to/lift")
 class LiftExtractor:
     """Extracts structured clinical data from PDFs and images via datalab-to/lift."""
 
-    def __init__(self, model_id: str | None = None) -> None:
+    def __init__(
+        self,
+        model_id: str | None = None,
+        device: str | None = None,
+        mock: bool | None = None,
+    ) -> None:
         self.model_id = model_id or DEFAULT_MODEL_ID
+        self.device = (device or os.environ.get("LIFT_DEVICE", "auto")).lower()
+        self.mock = (
+            mock
+            if mock is not None
+            else (os.environ.get("PHIRE_MOCK_LIFT", "").lower() in ("1", "true", "yes"))
+        )
         self._model = None
 
     def supports(self, file_path: Path) -> bool:
@@ -43,7 +54,18 @@ class LiftExtractor:
                 "lift-pdf package not installed. Install with: pip install 'lift-pdf[hf]'"
             )
 
-        if torch.cuda.is_available():
+        if self.device == "cpu":
+            # Force CPU mode: standard precision, device=cpu; strictly no BitsAndBytesConfig
+            try:
+                self._model = InferenceManager(
+                    method="hf",
+                    model_name=self.model_id,
+                    device="cpu",
+                    torch_dtype=torch.float32,
+                )
+            except TypeError:
+                self._model = InferenceManager(method="hf")
+        elif self.device in ("auto", "cuda") and torch.cuda.is_available():
             # In CUDA mode: 4-bit NF4 quantization via BitsAndBytesConfig
             try:
                 from transformers import BitsAndBytesConfig
@@ -86,7 +108,7 @@ class LiftExtractor:
             raise FileNotFoundError(f"File not found: {file_path}")
 
         # Check for fast mock mode (used for testing and CPU development)
-        if os.environ.get("PHIRE_MOCK_LIFT", "").lower() in ("1", "true", "yes"):
+        if self.mock:
             return self._generate_mock_payload(file_path)
 
         model = self._get_model()

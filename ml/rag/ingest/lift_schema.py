@@ -146,18 +146,18 @@ def validate_lift_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         "document_type": payload.get("document_type"),
         "observations": [
             obs for obs in obs_list
-            if isinstance(obs, dict) and "name" in obs and "value" in obs
+            if isinstance(obs, dict) and obs.get("name") is not None and obs.get("value") is not None
         ],
         "medications": [
             med for med in med_list
-            if isinstance(med, dict) and "name" in med
+            if isinstance(med, dict) and med.get("name") is not None
         ],
         "conditions": [
             cond for cond in cond_list
-            if isinstance(cond, dict) and "name" in cond
+            if isinstance(cond, dict) and cond.get("name") is not None
         ],
         "narrative_sections": [
             sec for sec in sec_list
-            if isinstance(sec, dict) and "content" in sec
+            if isinstance(sec, dict) and sec.get("content") is not None
         ],
     }

@@ -34,7 +34,6 @@ from ml.graph.medications import build_medications, write_medications
 from ml.graph.observations import build_lift_observations, write_observations
 from ml.rag.ingest.chunk_synthesizer import synthesize_patient_chunks
 from ml.rag.ingest.patient_documents import (
-    TextExtractor,
     extract_document_data,
     extract_text,
 )
@@ -95,7 +94,8 @@ def main() -> None:
 
     data = extract_document_data(args.file_path)
     document_id = hashlib.sha256(args.file_path.read_bytes()).hexdigest()[:16]
-    effective_date = data.get("document_date") or find_document_date(str(data))
+    raw_date = data.get("document_date")
+    effective_date = find_document_date(raw_date) if raw_date else find_document_date(str(data))
 
     chunks = build_chunks(args.file_path, data=data, document_id=document_id)
     HybridRetriever().add_documents(chunks)

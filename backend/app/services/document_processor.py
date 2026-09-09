@@ -5,7 +5,7 @@ retrieval indexing, and graph fact writing.
 Delegates all actual extraction/parsing to ml.rag.ingest and ml.graph
 (mirrors the sequence in ml/rag/ingest/ingest_patient_document.py's
 main()) rather than re-implementing document parsing in the backend --
-ml/'s pipeline does Lift VLM extraction, synthesized chunking, exact char-span
+ml/'s pipeline does Lift VLM extraction, synthesized chunking, Option A declarative clinical sentence
 citations, and structured graph fact extraction.
 This module is orchestration only: it drives ml/'s building blocks
 against one uploaded Document row and updates that row's status. On
@@ -26,7 +26,6 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.database.schemas import Document
 from app.services.ml_singletons import GPU_LOCK, get_lift_extractor, get_retriever, new_graph_client
 from app.utils.constants import DocumentStatus
@@ -51,7 +50,8 @@ def process_document(db: Session, document: Document) -> None:
         with GPU_LOCK:
             data = extract_document_data(path, extractor=get_lift_extractor())
             document_id = str(document.id)
-            effective_date = data.get("document_date") or find_document_date(str(data))
+            raw_date = data.get("document_date")
+            effective_date = find_document_date(raw_date) if raw_date else find_document_date(str(data))
 
             chunks = build_chunks(path, data=data, document_id=document_id)
             get_retriever().add_documents(chunks)

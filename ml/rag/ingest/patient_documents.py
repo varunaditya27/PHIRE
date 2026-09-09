@@ -27,31 +27,7 @@ class TextExtractor(Protocol):
     def extract(self, file_path: Path) -> str: ...
 
 
-class PDFTextExtractor:
-    """Backward-compatible PDF extractor adapter."""
-
-    def __init__(self, extractor: LiftExtractor | None = None) -> None:
-        self._extractor = extractor or _DEFAULT_EXTRACTOR
-
-    def supports(self, file_path: Path) -> bool:
-        return file_path.suffix.lower() == ".pdf"
-
-    def extract(self, file_path: Path) -> str:
-        return extract_text(file_path)
-
-
-DEFAULT_EXTRACTORS: list[TextExtractor] = [PDFTextExtractor()]
-
-
-def extract_text(file_path: Path, extractors: list[TextExtractor] | None = None) -> str:
-    """Backward-compatible text extraction routing."""
-    if extractors:
-        for extractor in extractors:
-            if extractor.supports(file_path):
-                return extractor.extract(file_path)
-        raise ValueError(f"No extractor available for {file_path.suffix!r} files: {file_path}")
-
-    data = extract_document_data(file_path)
+def _format_extracted_data(data: dict[str, Any]) -> str:
     lines = []
     if data.get("document_date"):
         lines.append(f"Date: {data['document_date']}")
@@ -73,3 +49,32 @@ def extract_text(file_path: Path, extractors: list[TextExtractor] | None = None)
     for sec in data.get("narrative_sections", []):
         lines.append(f"[{sec.get('heading', 'Note')}] {sec.get('content', '')}".strip())
     return "\n\n".join(lines).strip()
+
+
+class PDFTextExtractor:
+    """Backward-compatible PDF extractor adapter."""
+
+    def __init__(self, extractor: LiftExtractor | None = None) -> None:
+        self._extractor = extractor or _DEFAULT_EXTRACTOR
+
+    def supports(self, file_path: Path) -> bool:
+        return file_path.suffix.lower() == ".pdf"
+
+    def extract(self, file_path: Path) -> str:
+        data = self._extractor.extract(file_path)
+        return _format_extracted_data(data)
+
+
+DEFAULT_EXTRACTORS: list[TextExtractor] = [PDFTextExtractor()]
+
+
+def extract_text(file_path: Path, extractors: list[TextExtractor] | None = None) -> str:
+    """Backward-compatible text extraction routing."""
+    if extractors:
+        for extractor in extractors:
+            if extractor.supports(file_path):
+                return extractor.extract(file_path)
+        raise ValueError(f"No extractor available for {file_path.suffix!r} files: {file_path}")
+
+    data = extract_document_data(file_path)
+    return _format_extracted_data(data)

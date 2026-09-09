@@ -56,7 +56,11 @@ def get_lift_extractor():
     from ml.rag.ingest.lift_extractor import LiftExtractor
 
     settings = get_settings()
-    return LiftExtractor(model_id=settings.lift_model)
+    return LiftExtractor(
+        model_id=settings.lift_model,
+        device=settings.lift_device,
+        mock=settings.phire_mock_lift,
+    )
 
 
 @lru_cache

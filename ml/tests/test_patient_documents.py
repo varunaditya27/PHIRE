@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from ml.rag.ingest.patient_documents import (
     extract_document_data,
     extract_text,

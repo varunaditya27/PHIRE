@@ -1,4 +1,3 @@
-import pytest
 from ml.rag.ingest.lift_schema import CLINICAL_DOCUMENT_SCHEMA, validate_lift_payload
 
 
@@ -90,16 +89,20 @@ def test_validate_lift_payload_filters_malformed_items():
             {"name": "HDL", "value": "50"},  # valid
             {"name": "LDL"},  # missing value
             {"value": "100"},  # missing name
+            {"name": "Triglycerides", "value": None},  # None value
+            {"name": None, "value": "200"},  # None name
             "not a dict",
         ],
         "medications": [
             {"name": "Metformin"},  # valid
             {"dosage": "500mg"},  # missing name
+            {"name": None},  # None name
             123,
         ],
         "conditions": [
             {"name": "Diabetes"},  # valid
             {"status": "active"},  # missing name
+            {"name": None},  # None name
             None,
         ],
         "narrative_sections": [

@@ -61,18 +61,26 @@ def test_synthesize_patient_chunks_creates_structured_sentences():
     assert ldl_chunk.metadata["document_id"] == "doc123"
     assert ldl_chunk.metadata["source"] == "patient_document"
     assert ldl_chunk.metadata["authority"] == 1.0
+    assert ldl_chunk.metadata["entity_type"] == "observation"
+    assert ldl_chunk.metadata["entity_name"] == "LDL Cholesterol"
 
     # Check medication sentence format
     med_chunk = chunks[2]
     assert "Atorvastatin (20 mg, once daily) - Status: started" in med_chunk.text
+    assert med_chunk.metadata["entity_type"] == "medication"
+    assert med_chunk.metadata["entity_name"] == "Atorvastatin"
 
     # Check condition sentence format
     cond_chunk = chunks[3]
     assert "Condition: Hyperlipidemia (Status: active)" in cond_chunk.text
+    assert cond_chunk.metadata["entity_type"] == "condition"
+    assert cond_chunk.metadata["entity_name"] == "Hyperlipidemia"
 
     # Check narrative sentence format
     narrative_chunk = chunks[4]
     assert "[Impression] Patient presents with elevated atherogenic lipids." in narrative_chunk.text
+    assert narrative_chunk.metadata["entity_type"] == "narrative"
+    assert narrative_chunk.metadata["heading"] == "Impression"
 
 
 def test_synthesize_patient_chunks_handles_sparse_entities():

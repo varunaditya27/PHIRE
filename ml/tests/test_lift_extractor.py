@@ -68,6 +68,18 @@ def test_mock_extraction_truthy_flags(monkeypatch, tmp_path):
         assert len(res["observations"]) > 0
 
 
+def test_mock_parameter_enables_mock_mode_without_env_var(monkeypatch, tmp_path):
+    monkeypatch.delenv("PHIRE_MOCK_LIFT", raising=False)
+    dummy_file = tmp_path / "lab.pdf"
+    dummy_file.write_bytes(b"%PDF-1.4 dummy")
+
+    extractor = LiftExtractor(mock=True)
+    assert extractor.mock is True
+    result = extractor.extract(dummy_file)
+    assert result["document_type"] == "Diagnostic Laboratory Report"
+    assert len(result["observations"]) > 0
+
+
 def test_unsupported_file_extension_raises(tmp_path):
     dummy_file = tmp_path / "table.csv"
     dummy_file.write_text("col1,col2\n1,2")
@@ -138,6 +150,49 @@ def test_get_model_cuda_vs_cpu_branches():
             assert bnb_cfg.load_in_4bit is True
             assert bnb_cfg.bnb_4bit_quant_type == "nf4"
             assert bnb_cfg.bnb_4bit_compute_dtype == torch.float16
+
+
+def test_lift_device_cpu_forces_cpu_mode_even_when_cuda_available(monkeypatch):
+    monkeypatch.setenv("LIFT_DEVICE", "cpu")
+    extractor = LiftExtractor(model_id="datalab-to/lift")
+    mock_inference_manager = MagicMock()
+    lift_mod = types.ModuleType("lift")
+    lift_model_mod = types.ModuleType("lift.model")
+    lift_model_mod.InferenceManager = mock_inference_manager
+    lift_mod.model = lift_model_mod
+
+    with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            m = extractor._get_model()
+            assert m is mock_inference_manager.return_value
+            mock_inference_manager.assert_called_once_with(
+                method="hf",
+                model_name="datalab-to/lift",
+                device="cpu",
+                torch_dtype=torch.float32,
+            )
+            assert "quantization_config" not in mock_inference_manager.call_args.kwargs
+
+
+def test_lift_extractor_explicit_device_cpu_forces_cpu_mode():
+    extractor = LiftExtractor(model_id="datalab-to/lift", device="cpu")
+    mock_inference_manager = MagicMock()
+    lift_mod = types.ModuleType("lift")
+    lift_model_mod = types.ModuleType("lift.model")
+    lift_model_mod.InferenceManager = mock_inference_manager
+    lift_mod.model = lift_model_mod
+
+    with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            m = extractor._get_model()
+            assert m is mock_inference_manager.return_value
+            mock_inference_manager.assert_called_once_with(
+                method="hf",
+                model_name="datalab-to/lift",
+                device="cpu",
+                torch_dtype=torch.float32,
+            )
+            assert "quantization_config" not in mock_inference_manager.call_args.kwargs
 
 
 def test_real_extract_call_flow(tmp_path, monkeypatch):

@@ -14,7 +14,7 @@ sys.modules.setdefault("sqlalchemy", MagicMock())
 sys.modules.setdefault("sqlalchemy.orm", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
-from app.services.ml_singletons import get_lift_extractor, GPU_LOCK
+from app.services.ml_singletons import get_lift_extractor
 from app.services.document_processor import process_document, _rollback_ml_writes
 from app.utils.constants import DocumentStatus
 
