@@ -11,6 +11,7 @@ export default function Dashboard() {
   const [observations, setObservations] = useState<ObservationRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMarker, setSelectedMarker] = useState<string>("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -23,6 +24,11 @@ export default function Dashboard() {
         ]);
         setTimeline(timelineData);
         setObservations(obsData);
+        if (timelineData.series.length > 0) {
+          setSelectedMarker((prev) =>
+            timelineData.series.some((s) => s.name === prev) ? prev : timelineData.series[0].name
+          );
+        }
       } catch (err: any) {
         setError(err.message || "Failed to load dashboard data. Ensure backend is running.");
       } finally {
@@ -32,23 +38,24 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
-  // Transform timeline series into a flat array of data points for Recharts
-  // Note: Recharts prefers an array of objects where each object is a point in time
-  // { date: '2026-08-20', 'LDL Cholesterol': 162, 'Heart Rate': 72 }
+  // The dropdown shows one marker's trend at a time rather than overlaying
+  // every marker on one chart (different units/scales made the combined
+  // view unreadable once more than a couple of markers had data).
+  const selectedSeries = useMemo(
+    () => timeline?.series.find((s) => s.name === selectedMarker) ?? null,
+    [timeline, selectedMarker]
+  );
+
   const chartData = useMemo(() => {
-    if (!timeline?.series) return [];
-    const dataByDate: Record<string, any> = {};
-    timeline.series.forEach(series => {
-      series.points.forEach(point => {
-        if (!dataByDate[point.observed_date]) {
-          dataByDate[point.observed_date] = { date: point.observed_date };
-        }
-        dataByDate[point.observed_date][series.name] = point.value_numeric;
-      });
-    });
-    // Sort by date
-    return Object.values(dataByDate).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [timeline]);
+    if (!selectedSeries) return [];
+    return [...selectedSeries.points]
+      .sort((a, b) => new Date(a.observed_date).getTime() - new Date(b.observed_date).getTime())
+      .map((point) => ({
+        date: point.observed_date,
+        [selectedSeries.name]: point.value_numeric,
+        unit: point.unit,
+      }));
+  }, [selectedSeries]);
 
   // Generate colors for lines based on DESIGN.md palette (oxide, ochre, ink)
   const colors = ["#8C3F2B", "#96742A", "#55503F", "#7A755F", "#9C9782"];
@@ -81,34 +88,58 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-card rounded-xl p-6 shadow-sm border border-border">
-            <h2 className="text-xl font-semibold mb-6 flex items-center text-foreground">
-              <Activity className="w-5 h-5 mr-2 text-foreground" />
-              Health Timeline
-            </h2>
-            
+            <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+              <h2 className="text-xl font-semibold flex items-center text-foreground">
+                <Activity className="w-5 h-5 mr-2 text-foreground" />
+                Health Timeline
+              </h2>
+
+              {timeline && timeline.series.length > 0 && (
+                <select
+                  value={selectedMarker}
+                  onChange={(e) => setSelectedMarker(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                >
+                  {timeline.series.map((series) => (
+                    <option key={series.name} value={series.name}>
+                      {series.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
             {chartData.length > 0 ? (
               <div className="h-[400px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="date" stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="var(--muted-foreground)" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip 
+                    <YAxis
+                      stroke="var(--muted-foreground)"
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
+                      label={
+                        chartData[0]?.unit
+                          ? { value: chartData[0].unit, angle: -90, position: "insideLeft", fill: "var(--muted-foreground)", fontSize: 12 }
+                          : undefined
+                      }
+                    />
+                    <Tooltip
                       contentStyle={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)', borderRadius: '8px' }}
                       itemStyle={{ color: 'var(--foreground)' }}
                     />
                     <Legend iconType="circle" wrapperStyle={{ fontSize: '14px' }} />
-                    {timeline?.series.map((series, idx) => (
-                      <Line 
-                        key={series.name}
-                        type="monotone" 
-                        dataKey={series.name} 
-                        stroke={colors[idx % colors.length]} 
-                        strokeWidth={3}
-                        dot={{ r: 4, fill: colors[idx % colors.length], strokeWidth: 0 }}
-                        activeDot={{ r: 6 }}
-                      />
-                    ))}
+                    <Line
+                      type="monotone"
+                      dataKey={selectedMarker}
+                      stroke={colors[0]}
+                      strokeWidth={3}
+                      dot={{ r: 4, fill: colors[0], strokeWidth: 0 }}
+                      activeDot={{ r: 6 }}
+                      connectNulls
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>

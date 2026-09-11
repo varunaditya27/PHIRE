@@ -31,17 +31,25 @@ class Settings(BaseSettings):
     # --- Ollama ---
     # medgemma:4b is the only tag ml/ actually pulls (see
     # ml/llm/ollama_client.py) -- medgemma ships 4B/27B, not 8B.
-    ollama_host: str = "http://localhost:11434"
+    # Points at a native `ollama serve` process (port 11435), not the
+    # Docker-run Ollama on 11434 used elsewhere in dev -- Docker Desktop on
+    # macOS has no Metal/GPU passthrough, so chat generation on that
+    # instance runs CPU-only and is what made responses slow. The native
+    # process reaches the host GPU directly (see also
+    # ml/rag/ingest/gemini_extractor.py's docstring for the same
+    # Docker-vs-native distinction on the extraction side).
+    ollama_host: str = Field(default="http://127.0.0.1:11435", validation_alias="OLLAMA_HOST")
     ollama_model: str = "medgemma:4b"
-    ollama_timeout_seconds: float = 30.0
+    ollama_timeout_seconds: float = 180.0
 
     # --- Legacy model config (deprecated; superseded by Lift VLM) ---
     ocr_model: str = "olmocr"
     prose_extraction_model: str = "qwen3.5:9b"
 
-    # --- Lift VLM ---
-    lift_model: str = Field(default="datalab-to/lift", validation_alias="LIFT_MODEL")
-    lift_device: str = Field(default="auto", validation_alias="LIFT_DEVICE")
+    # --- Document extraction (cloud vision LLM, see
+    # ml/rag/ingest/gemini_extractor.py) ---
+    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_MODEL")
     phire_mock_lift: bool = Field(default=True, validation_alias="PHIRE_MOCK_LIFT")
 
     # --- Neo4j (ml/graph -- Longitudinal Health Graph) ---

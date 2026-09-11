@@ -20,9 +20,9 @@ per-row scoping needed.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -47,6 +47,11 @@ class Document(Base):
     content_type: Mapped[str] = mapped_column(String, nullable=False)
     storage_path: Mapped[str] = mapped_column(String, nullable=False)  # immutable original artifact
     status: Mapped[str] = mapped_column(String, default=DocumentStatus.UPLOADED.value, nullable=False)
+    # Clinical date of the report itself (user-selected at upload, defaults
+    # to today) -- distinct from uploaded_at. This is the date ml/'s graph
+    # writers attach to every fact extracted from this document, so the AI
+    # always has a concrete reference date instead of guessing from raw text.
+    report_date: Mapped[date] = mapped_column(Date, default=date.today, nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

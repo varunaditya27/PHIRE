@@ -9,9 +9,10 @@ immediately with status "uploaded"; poll GET /api/documents/{id} for
 """
 
 import uuid
+from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -43,6 +44,7 @@ def _run_processing(document_id: uuid.UUID) -> None:
 async def upload_document(
     file: UploadFile,
     background_tasks: BackgroundTasks,
+    report_date: date | None = Form(None),
     db: Session = Depends(get_db),
 ) -> DocumentUploadResponse:
     validate_upload(file)
@@ -54,6 +56,7 @@ async def upload_document(
     document_id = uuid.uuid4()
     extension = SUPPORTED_FILE_TYPES[file.content_type]
     storage_path = upload_dir / f"{document_id}{extension}"
+    effective_report_date = report_date or date.today()
 
     def _write_and_record() -> Document:
         # mkdir/write_bytes/commit are all blocking calls -- run off the
@@ -68,6 +71,7 @@ async def upload_document(
             content_type=file.content_type,
             storage_path=str(storage_path),
             status=DocumentStatus.UPLOADED.value,
+            report_date=effective_report_date,
         )
         db.add(document)
         db.commit()
@@ -77,7 +81,12 @@ async def upload_document(
 
     background_tasks.add_task(_run_processing, document_id)
 
-    return DocumentUploadResponse(id=document.id, filename=document.filename, status=DocumentStatus.UPLOADED)
+    return DocumentUploadResponse(
+        id=document.id,
+        filename=document.filename,
+        status=DocumentStatus.UPLOADED,
+        report_date=document.report_date,
+    )
 
 
 @router.post("/{document_id}/process", response_model=DocumentUploadResponse)

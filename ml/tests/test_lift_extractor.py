@@ -124,8 +124,9 @@ def test_get_model_cuda_vs_cpu_branches():
     lift_mod.model = lift_model_mod
 
     with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
-        # When CUDA is not available: CPU mode without BitsAndBytesConfig
-        with patch.object(torch.cuda, "is_available", return_value=False):
+        # When neither CUDA nor MPS is available: CPU mode without BitsAndBytesConfig
+        with patch.object(torch.cuda, "is_available", return_value=False), \
+             patch.object(torch.backends.mps, "is_available", return_value=False):
             extractor._model = None
             m = extractor._get_model()
             assert m is mock_inference_manager.return_value

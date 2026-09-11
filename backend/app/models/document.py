@@ -6,7 +6,7 @@ Distinguishes the immutable original artifact from its derived structured
 representation (observations extracted from it).
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ class DocumentUploadResponse(BaseModel):
     id: UUID
     filename: str
     status: DocumentStatus
+    report_date: date
 
 
 class DocumentRead(BaseModel):
@@ -25,6 +26,7 @@ class DocumentRead(BaseModel):
     filename: str
     content_type: str
     status: DocumentStatus
+    report_date: date
     uploaded_at: datetime
     processed_at: datetime | None = None
     error_message: str | None = None

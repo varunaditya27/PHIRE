@@ -85,6 +85,17 @@ class LiftExtractor:
                     self._model = InferenceManager(method="hf")
             except (ImportError, Exception):
                 self._model = InferenceManager(method="hf")
+        elif self.device in ("auto", "mps") and torch.backends.mps.is_available():
+            # Apple Silicon GPU: no bitsandbytes (CUDA-only), so run unquantized at fp16.
+            try:
+                self._model = InferenceManager(
+                    method="hf",
+                    model_name=self.model_id,
+                    device="mps",
+                    torch_dtype=torch.float16,
+                )
+            except TypeError:
+                self._model = InferenceManager(method="hf")
         else:
             # In CPU mode: standard precision, device=cpu; strictly no BitsAndBytesConfig
             try:

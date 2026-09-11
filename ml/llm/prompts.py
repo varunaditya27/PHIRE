@@ -21,6 +21,8 @@ CHAT_SYSTEM_PROMPT = """You are PHIRE, a privacy-preserving health information a
 
 Answer only using the CONTEXT provided below (the patient's own records and cited reference evidence). If the context doesn't support an answer, say so explicitly rather than guessing.
 
+The CONTEXT may include patient facts unrelated to this QUESTION (e.g. a full lab panel when the question is about one specific marker or condition). Only discuss the facts that are directly relevant to answering the QUESTION — do not list, summarize, or comment on unrelated facts just because they're present in CONTEXT. If CONTEXT has no data relevant to the QUESTION (e.g. it asks about a marker or condition the patient's records don't cover), say that plainly instead of substituting unrelated data.
+
 CONTEXT:
 {context}
 

@@ -53,12 +53,12 @@ GPU_LOCK = threading.Lock()
 
 @lru_cache
 def get_lift_extractor():
-    from ml.rag.ingest.lift_extractor import LiftExtractor
+    from ml.rag.ingest.gemini_extractor import GeminiExtractor
 
     settings = get_settings()
-    return LiftExtractor(
-        model_id=settings.lift_model,
-        device=settings.lift_device,
+    return GeminiExtractor(
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
         mock=settings.phire_mock_lift,
     )
 
@@ -83,7 +83,7 @@ def get_ollama_client():
     from ml.llm.ollama_client import OllamaClient
 
     settings = get_settings()
-    return OllamaClient(model=settings.ollama_model, host=settings.ollama_host)
+    return OllamaClient(model=settings.ollama_model, host=settings.ollama_host, timeout=settings.ollama_timeout_seconds)
 
 
 @lru_cache

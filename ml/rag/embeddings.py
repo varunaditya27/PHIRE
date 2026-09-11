@@ -74,7 +74,11 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_QUERY_MODEL = "ncbi/MedCPT-Query-Encoder"
 DEFAULT_ARTICLE_MODEL = "ncbi/MedCPT-Article-Encoder"
-_DEVICE = "cuda" if getattr(torch.cuda, "is_available", lambda: False)() else "cpu"
+_DEVICE = (
+    "cuda" if getattr(torch.cuda, "is_available", lambda: False)()
+    else "mps" if getattr(getattr(torch, "backends", None), "mps", None) and torch.backends.mps.is_available()
+    else "cpu"
+)
 
 
 class EmbeddingModel:

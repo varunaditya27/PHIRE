@@ -6,23 +6,51 @@ import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, RefreshCw, Loa
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRead[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reportDate, setReportDate] = useState(todayISO());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load documents from localStorage cache if any (since there's no list documents endpoint)
+  // Load documents from localStorage cache if any (since there's no list documents endpoint).
+  // The cache is keyed by document id, which no longer resolves after a
+  // backend/DB reset -- reconcile against the backend once on mount and
+  // drop any card whose document is gone, instead of leaving stale cards
+  // around until someone manually clears localStorage.
   useEffect(() => {
     const saved = localStorage.getItem("phire_documents");
-    if (saved) {
-      try {
-        setDocuments(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse saved docs", e);
-      }
+    if (!saved) return;
+
+    let cached: DocumentRead[];
+    try {
+      cached = JSON.parse(saved);
+    } catch (e) {
+      console.error("Failed to parse saved docs", e);
+      return;
     }
+    setDocuments(cached);
+
+    (async () => {
+      const results = await Promise.all(
+        cached.map(async (doc) => {
+          try {
+            return await api.documents.get(doc.id);
+          } catch {
+            return null; // document no longer exists on the backend
+          }
+        })
+      );
+      const stillValid = results.filter((d): d is DocumentRead => d !== null);
+      if (stillValid.length !== cached.length) {
+        saveDocuments(stillValid);
+      }
+    })();
   }, []);
 
   const saveDocuments = (docs: DocumentRead[]) => {
@@ -79,12 +107,13 @@ export default function DocumentsPage() {
     setErrorMessage(null);
 
     try {
-      const res: DocumentUploadResponse = await api.documents.upload(file);
+      const res: DocumentUploadResponse = await api.documents.upload(file, reportDate);
       const newDoc: DocumentRead = {
         id: res.id,
         filename: res.filename,
         content_type: file.type,
         status: "uploaded",
+        report_date: res.report_date,
         uploaded_at: new Date().toISOString(),
         processed_at: null,
         error_message: null,
@@ -170,6 +199,24 @@ export default function DocumentsPage() {
         </div>
       )}
 
+      {/* Report Date Selector */}
+      <div className="flex items-center gap-3 p-4 rounded-xl bg-card border border-border">
+        <label htmlFor="report-date" className="text-sm font-medium text-foreground whitespace-nowrap">
+          Report date
+        </label>
+        <input
+          id="report-date"
+          type="date"
+          value={reportDate}
+          max={todayISO()}
+          onChange={(e) => setReportDate(e.target.value || todayISO())}
+          className="px-3 py-1.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+        />
+        <span className="text-xs text-muted-foreground">
+          The clinical date this report is from. Defaults to today if left unchanged — used as the reference date for every fact extracted from it.
+        </span>
+      </div>
+
       {/* Upload Drop Zone */}
       <div
         onDragEnter={handleDrag}
@@ -242,7 +289,16 @@ export default function DocumentsPage() {
                         <h4 className="font-semibold text-foreground text-sm truncate max-w-[220px]">
                           {doc.filename}
                         </h4>
+                        <span className="text-xs text-muted-foreground block">
+                          Report date:{" "}
+                          {new Date(doc.report_date).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </span>
                         <span className="text-xs text-muted-foreground">
+                          Uploaded{" "}
                           {new Date(doc.uploaded_at).toLocaleDateString(undefined, {
                             month: "short",
                             day: "numeric",

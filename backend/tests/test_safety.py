@@ -3,6 +3,9 @@ import sys, os
 sys.path.append(os.path.abspath('.'))
 
 from ml.chains.qa_chain import QAChain, NO_EVIDENCE_MESSAGE, ChatResponse
+from ml.rag.retriever import HybridRetriever
+from ml.rag.reranker import Reranker
+from ml.claims.verifier import ClaimVerifier
 # Mock verifier that does nothing (won't be called due to early abort)
 class MockVerifier:
     def verify(self, claim, evidence):

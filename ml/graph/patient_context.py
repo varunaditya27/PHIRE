@@ -11,6 +11,7 @@ from Neo4j. This does.
 
 from ml.graph.client import GraphClient
 from ml.graph.observations import DEFAULT_PATIENT_ID
+from ml.graph.reference_ranges import TOPIC_MARKERS, classify, get_reference_range
 
 
 def _fetch_observations(client: GraphClient, patient_id: str) -> list[dict]:
@@ -136,3 +137,72 @@ def get_trend_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID) -
             f"to {latest['raw_value']} on {latest['effective']} ({direction} of {abs(delta):.1f} {unit}).".replace("  ", " ")
         )
     return facts
+
+
+def get_reference_range_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID) -> list[str]:
+    """One sentence per current observation classifying it against a standard reference range.
+
+    Only for markers the source document itself didn't already print a
+    reference_range/interpretation for (see ml/graph/reference_ranges.py's
+    docstring) -- if the report says "High" itself, that's already a
+    direct fact via _format_observation, and this would be redundant.
+    Same DERIVED mechanism as get_trend_facts: the low/normal/high
+    classification is computed here in Python (exact, deterministic),
+    not left for the LLM to work out or for NLI to confirm on its own.
+    """
+    latest_by_code: dict[str, dict] = {}
+    for row in _fetch_observations(client, patient_id):
+        latest_by_code[row["code"]] = row
+
+    facts = []
+    for row in latest_by_code.values():
+        if row["reference_range"] or row["interpretation"] or row["value"] is None:
+            continue
+        ref = get_reference_range(row["code"])
+        if ref is None:
+            continue
+        label = classify(row["value"], ref)
+        facts.append(
+            f"{row['code']} of {row['raw_value']} is {label} "
+            f"(standard reference range: {ref.citation})."
+        )
+    return facts
+
+
+def get_topic_marker_facts(client: GraphClient, topic: str, patient_id: str = DEFAULT_PATIENT_ID) -> tuple[list[str], list[str]]:
+    """(facts, missing_markers) for a health topic (see
+    ml.graph.reference_ranges.TOPIC_MARKERS/detect_topic).
+
+    Lets a question like "do I have diabetes" or "is my thyroid normal"
+    be answered by directly checking exactly the markers that matter for
+    that topic, instead of retrieval + an LLM free-associating over
+    whatever's in the patient's full panel (which, for a topic the
+    uploaded reports don't cover, tends to make the model discuss
+    unrelated markers instead of just saying so -- found live). Each
+    fact prefers the report's own printed interpretation/reference_range
+    over the computed one, same precedence as get_reference_range_facts.
+    missing_markers lists topic markers this patient has no reading for
+    at all, so the caller can say so plainly rather than silently
+    omitting them.
+    """
+    latest_by_code: dict[str, dict] = {}
+    for row in _fetch_observations(client, patient_id):
+        latest_by_code[row["code"]] = row
+
+    facts: list[str] = []
+    missing: list[str] = []
+    for marker in TOPIC_MARKERS.get(topic, []):
+        row = latest_by_code.get(marker)
+        if row is None or row["value"] is None:
+            missing.append(marker)
+            continue
+        if row["reference_range"] or row["interpretation"]:
+            facts.append(_format_observation(row))
+            continue
+        ref = get_reference_range(marker)
+        if ref is not None:
+            label = classify(row["value"], ref)
+            facts.append(f"{marker} of {row['raw_value']} is {label} (standard reference range: {ref.citation}).")
+        else:
+            facts.append(f"{marker} was {row['raw_value']} on {row['effective']}.")
+    return facts, missing

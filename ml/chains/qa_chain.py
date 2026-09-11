@@ -26,7 +26,12 @@ try:
     from ml.graph.client import GraphClient
 except Exception:  # pragma: no cover
     GraphClient = None
-from ml.graph.patient_context import get_current_patient_facts, get_patient_facts, get_trend_facts
+from ml.graph.patient_context import (
+    get_current_patient_facts,
+    get_patient_facts,
+    get_reference_range_facts,
+    get_trend_facts,
+)
 from ml.llm.ollama_client import OllamaClient
 from ml.llm.prompt_builder import build_chat_prompt
 from ml.rag.reranker import Reranker
@@ -113,9 +118,9 @@ class QAChain:
         (ml/graph/patient_context.py) -- callers only need to pass it
         explicitly to override that default (e.g. tests).
         """
-        history_facts, current_facts, trend_facts = self._graph_facts(need_history=observations is None)
+        history_facts, current_facts, trend_facts, range_facts = self._graph_facts(need_history=observations is None)
         if observations is None:
-            observations = history_facts + trend_facts
+            observations = history_facts + trend_facts + range_facts
 
         # Wide candidate pool before reranking, not just top_k*2: a
         # specific patient fact (one line, narrow match) competes against
@@ -155,7 +160,7 @@ class QAChain:
         # can relabel a match here as DERIVED rather than SUPPORTED (see
         # ml/claims/verifier.py's docstring for why DERIVED can't be
         # implemented as an NLI-only distinction).
-        derived_evidence = self._facts_to_chunks(trend_facts, source="patient_derived")
+        derived_evidence = self._facts_to_chunks(trend_facts + range_facts, source="patient_derived")
         verification_pool = patient_evidence + derived_evidence + evidence
 
         verified = [self._verify_claim(claim, verification_pool) for claim in self._extractor.extract(draft_answer)]
@@ -163,34 +168,36 @@ class QAChain:
         answer = " ".join(c.claim for c in supported) if supported else NO_EVIDENCE_MESSAGE
         return ChatResponse(answer=answer, claims=verified)
 
-    def _graph_facts(self, need_history: bool) -> tuple[list[str], list[str], list[str]]:
-        """(history facts, current facts, trend facts) from the graph, or three empty
-        lists if Neo4j is unreachable.
+    def _graph_facts(self, need_history: bool) -> tuple[list[str], list[str], list[str], list[str]]:
+        """(history facts, current facts, trend facts, reference-range facts) from the
+        graph, or four empty lists if Neo4j is unreachable.
 
         The graph layer is documented (CLAUDE.md) as "not MVP-blocking" --
         a general question with no patient-specific content shouldn't
         502 the whole request just because Neo4j is down; it should just
         lose the patient-specific/trend grounding for that turn. Fetched
         together in one try/except (not one per call site) so a partial
-        graph outage can't leave observations/current_facts/trend_facts
-        in an inconsistent mix of real and empty. get_trend_facts is only
-        computed once, reused for both the prompt-context `observations`
-        and the trend-claim verification pool below, instead of querying
-        the graph for the identical result twice.
+        graph outage can't leave observations/current_facts/trend_facts/
+        range_facts in an inconsistent mix of real and empty.
+        get_trend_facts/get_reference_range_facts are only computed once
+        each, reused for both the prompt-context `observations` and the
+        verification pool below, instead of querying the graph for the
+        identical result twice.
         """
         # If no graph client (e.g., missing neo4j), skip graph facts
         if self._graph_client is None:
-            return [], [], []
+            return [], [], [], []
         history_facts: list[str] = []
         try:
             if need_history:
                 history_facts = get_patient_facts(self._graph_client)
             current_facts = get_current_patient_facts(self._graph_client)
             trend_facts = get_trend_facts(self._graph_client)
+            range_facts = get_reference_range_facts(self._graph_client)
         except Exception as exc:  # noqa: BLE001
             print(f"QAChain: graph unavailable, answering without patient-graph facts: {exc}")
-            return [], [], []
-        return history_facts, current_facts, trend_facts
+            return [], [], [], []
+        return history_facts, current_facts, trend_facts, range_facts
 
     @staticmethod
     def _facts_to_chunks(facts: list[str], source: str) -> list[Chunk]:

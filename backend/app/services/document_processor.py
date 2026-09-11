@@ -39,19 +39,21 @@ def process_document(db: Session, document: Document) -> None:
 
     try:
         from ml.graph.conditions import build_conditions, write_conditions
-        from ml.graph.document_dates import find_document_date
         from ml.graph.medications import build_medications, write_medications
         from ml.graph.observations import build_lift_observations, write_observations
         from ml.rag.ingest.ingest_patient_document import build_chunks
         from ml.rag.ingest.patient_documents import extract_document_data
 
         path = Path(document.storage_path)
+        # The user-selected (or today-defaulted) report_date is the single
+        # source of truth for every fact this document contributes to the
+        # graph -- not a date guessed from the document's own text -- so the
+        # AI always has a concrete, trustworthy reference date per report.
+        effective_date = document.report_date.isoformat()
 
         with GPU_LOCK:
             data = extract_document_data(path, extractor=get_lift_extractor())
             document_id = str(document.id)
-            raw_date = data.get("document_date")
-            effective_date = find_document_date(raw_date) if raw_date else find_document_date(str(data))
 
             chunks = build_chunks(path, data=data, document_id=document_id)
             get_retriever().add_documents(chunks)

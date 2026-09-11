@@ -26,7 +26,9 @@ from app.models.claim import Claim
 from app.models.response import ChatRequest, ChatResponse
 from app.services.ml_singletons import GPU_LOCK, get_qa_chain
 from app.services.intent_classifier import classify_intent, Intent
-from ml.graph.patient_context import get_current_patient_facts
+from app.utils.constants import EvidenceStatus
+from ml.graph.patient_context import get_current_patient_facts, get_topic_marker_facts
+from ml.graph.reference_ranges import TOPIC_MARKERS, detect_topic
 from app.services.ml_singletons import new_graph_client
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -36,6 +38,36 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     db.add(ChatMessage(role="user", content=request.message))
     db.commit()
+
+    # Topic short-circuit: a question naming a known health topic ("do I
+    # have diabetes", "is my thyroid normal") is answered by directly
+    # checking exactly the markers that matter for it (see
+    # ml.graph.reference_ranges.TOPIC_MARKERS/detect_topic), not by
+    # sending the whole patient panel + question to the LLM and hoping it
+    # stays on-topic -- found live: for a report that doesn't cover the
+    # asked-about topic, the LLM would instead narrate unrelated markers
+    # from whatever panel the patient does have. This runs before intent
+    # classification/QAChain entirely, and needs no LLM call: the
+    # value-vs-range check is exact, so every fact here is DERIVED at
+    # full confidence, not something for NLI to confirm.
+    topic = detect_topic(request.message)
+    if topic is not None:
+        facts, missing = get_topic_marker_facts(new_graph_client(), topic)
+        answer_parts = list(facts)
+        if missing:
+            answer_parts.append(f"Your uploaded reports don't include a result for: {', '.join(missing)}.")
+        answer = " ".join(answer_parts)
+        claims = [
+            Claim(statement=f, status=EvidenceStatus.DERIVED, confidence=1.0)
+            for f in facts
+        ]
+        assistant_message = ChatMessage(role="assistant", content=answer, claims=[c.model_dump() for c in claims])
+        db.add(assistant_message)
+        db.flush()
+        for claim in claims:
+            db.add(ClaimRow(chat_message_id=assistant_message.id, statement=claim.statement, status=claim.status.value, confidence=claim.confidence))
+        db.commit()
+        return ChatResponse(id=assistant_message.id, answer=answer, claims=claims, created_at=assistant_message.created_at)
 
     intent = classify_intent(request.message)
     if intent == Intent.DIAGNOSIS_REQUEST:

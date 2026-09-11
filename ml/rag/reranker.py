@@ -45,7 +45,11 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from ml.rag.retriever import Chunk
 
 DEFAULT_CROSS_ENCODER_MODEL = "ncbi/MedCPT-Cross-Encoder"
-_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+_DEVICE = (
+    "cuda" if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available()
+    else "cpu"
+)
 
 # Relevance dominates (it's the only signal grounded in query content);
 # authority and recency nudge the ordering among otherwise-similar matches.

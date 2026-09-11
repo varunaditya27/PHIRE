@@ -31,6 +31,7 @@ export interface DocumentUploadResponse {
   id: string;
   filename: string;
   status: string;
+  report_date: string;
 }
 
 export interface DocumentRead {
@@ -38,6 +39,7 @@ export interface DocumentRead {
   filename: string;
   content_type: string;
   status: "uploaded" | "processing" | "processed" | "failed";
+  report_date: string;
   uploaded_at: string;
   processed_at: string | null;
   error_message: string | null;
@@ -126,12 +128,12 @@ export const api = {
     }),
   },
   documents: {
-    upload: async (file: File) => {
+    upload: async (file: File, reportDate?: string) => {
       const formData = new FormData();
       formData.append("file", file);
+      // Omitted -> backend defaults to today's date.
+      if (reportDate) formData.append("report_date", reportDate);
       // Let browser set the correct content-type for FormData including boundary
-      const headers = new Headers();
-      // Remove content-type so browser sets it
       return fetchAPI<DocumentUploadResponse>("/api/documents/upload", {
         method: "POST",
         body: formData,

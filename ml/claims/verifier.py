@@ -42,7 +42,11 @@ except ImportError:  # pragma: no cover
 from ml.rag.retriever import Chunk
 
 DEFAULT_MODEL = "facebook/bart-large-mnli"
-_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+_DEVICE = (
+    "cuda" if torch.cuda.is_available()
+    else "mps" if torch.backends.mps.is_available()
+    else "cpu"
+)
 
 # Calibrated against this model's own probability distribution on
 # ml/claims/experiments/'s benchmark, not a generic cutoff — see
@@ -112,5 +116,5 @@ class ClaimVerifier:
             return "CONFLICTING"
         if probs["entailment"] >= ENTAILMENT_THRESHOLD:
             return "SUPPORTED"
-        # Neither entailment nor contradiction is strong enough; treat as unsupported
-        return "UNSUPPORTED"
+        # Evidence exists but is neither a strong entailment nor a strong contradiction
+        return "UNCERTAIN"
