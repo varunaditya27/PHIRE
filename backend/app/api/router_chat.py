@@ -29,7 +29,8 @@ from app.database.connection import SessionLocal, get_db
 from app.database.schemas import ChatMessage
 from app.database.schemas import Claim as ClaimRow
 from app.models.claim import Claim
-from app.models.response import ChatRequest, ChatResponse
+from app.models.response import ChatMessageRead, ChatRequest, ChatResponse
+from app.services.citations import chunk_to_citation
 from app.services.gpu_modes import CHAT, gpu_mode
 from app.services.ml_singletons import get_qa_chain
 
@@ -100,6 +101,7 @@ def run_chat(db: Session, message: str, on_progress: Callable[[str, str], None] 
         id=assistant_message.id,
         answer=chain_response.answer,
         claims=claims,
+        citations=[chunk_to_citation(c) for c in chain_response.evidence],
         created_at=assistant_message.created_at,
     )
 
@@ -107,6 +109,13 @@ def run_chat(db: Session, message: str, on_progress: Callable[[str, str], None] 
 @router.post("", response_model=ChatResponse)
 def chat(request: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     return run_chat(db, request.message)
+
+
+@router.get("/messages", response_model=list[ChatMessageRead])
+def chat_messages(limit: int = 200, db: Session = Depends(get_db)) -> list[ChatMessage]:
+    """The most recent `limit` turns, oldest first, so a reloaded page can rebuild the conversation."""
+    newest_first = db.query(ChatMessage).order_by(ChatMessage.created_at.desc()).limit(limit).all()
+    return list(reversed(newest_first))
 
 
 def _sse(event: str, data: dict) -> str:

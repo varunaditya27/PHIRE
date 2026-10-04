@@ -17,7 +17,8 @@ def _fetch_observations(client: GraphClient, patient_id: str) -> list[dict]:
     """Every stored Observation, oldest effective date first."""
     return client.run(
         "MATCH (:Patient {id: $patient_id})-[:HAS_OBSERVATION]->(o:Observation) "
-        "RETURN o.code AS code, o.raw_value AS raw_value, o.reference_range AS reference_range, "
+        "OPTIONAL MATCH (o)-[:FROM_DOCUMENT]->(d:Document) "
+        "RETURN d.filename AS filename, o.code AS code, o.raw_value AS raw_value, o.reference_range AS reference_range, "
         "o.interpretation AS interpretation, o.effective AS effective, o.value AS value, o.unit AS unit "
         "ORDER BY o.effective",
         patient_id=patient_id,
@@ -30,25 +31,30 @@ def _format_observation(row: dict) -> str:
     return f"{row['code']}: {row['raw_value']}{detail}{flag} on {row['effective']}."
 
 
-def _fetch_medication_facts(client: GraphClient, patient_id: str) -> list[str]:
+def _fetch_medication_facts(client: GraphClient, patient_id: str) -> list[tuple[str, str | None]]:
+    """(fact sentence, source filename) for every stored medication."""
     facts = []
     for row in client.run(
         "MATCH (:Patient {id: $patient_id})-[:HAS_MEDICATION]->(m:Medication) "
-        "RETURN m.code AS code, m.dosage AS dosage, m.frequency AS frequency, m.status AS status",
+        "OPTIONAL MATCH (m)-[:FROM_DOCUMENT]->(d:Document) "
+        "RETURN d.filename AS filename, m.code AS code, m.dosage AS dosage, m.frequency AS frequency, "
+        "m.status AS status",
         patient_id=patient_id,
     ):
         dose = f" {row['dosage']}" if row["dosage"] else ""
         freq = f" {row['frequency']}" if row["frequency"] else ""
-        facts.append(f"Medication: {row['code']}{dose}{freq} ({row['status']}).")
+        facts.append((f"Medication: {row['code']}{dose}{freq} ({row['status']}).", row.get("filename")))
     return facts
 
 
-def _fetch_condition_facts(client: GraphClient, patient_id: str) -> list[str]:
+def _fetch_condition_facts(client: GraphClient, patient_id: str) -> list[tuple[str, str | None]]:
+    """(fact sentence, source filename) for every stored condition."""
     return [
-        f"Condition: {row['code']} ({row['status']})."
+        (f"Condition: {row['code']} ({row['status']}).", row.get("filename"))
         for row in client.run(
             "MATCH (:Patient {id: $patient_id})-[:HAS_CONDITION]->(c:Condition) "
-            "RETURN c.code AS code, c.status AS status",
+            "OPTIONAL MATCH (c)-[:FROM_DOCUMENT]->(d:Document) "
+            "RETURN d.filename AS filename, c.code AS code, c.status AS status",
             patient_id=patient_id,
         )
     ]
@@ -72,12 +78,19 @@ def get_patient_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID)
     """
     return (
         [_format_observation(row) for row in _fetch_observations(client, patient_id)]
-        + _fetch_medication_facts(client, patient_id)
-        + _fetch_condition_facts(client, patient_id)
+        + [fact for fact, _ in _fetch_medication_facts(client, patient_id)]
+        + [fact for fact, _ in _fetch_condition_facts(client, patient_id)]
     )
 
 
 def get_current_patient_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID) -> list[str]:
+    """Current-state fact sentences only; see get_current_patient_facts_with_sources."""
+    return [fact for fact, _ in get_current_patient_facts_with_sources(client, patient_id)]
+
+
+def get_current_patient_facts_with_sources(
+    client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID,
+) -> list[tuple[str, str | None]]:
     """Return the patient's *current* state: latest value per metric, plus all medications/conditions.
 
     Used for claim verification, not the generation prompt. Checking a
@@ -95,7 +108,7 @@ def get_current_patient_facts(client: GraphClient, patient_id: str = DEFAULT_PAT
         latest_by_code[row["code"]] = row
 
     return (
-        [_format_observation(row) for row in latest_by_code.values()]
+        [(_format_observation(row), row.get("filename")) for row in latest_by_code.values()]
         + _fetch_medication_facts(client, patient_id)
         + _fetch_condition_facts(client, patient_id)
     )

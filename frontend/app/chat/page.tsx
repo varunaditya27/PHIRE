@@ -29,6 +29,26 @@ export default function ChatPage() {
   const [expandedClaims, setExpandedClaims] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Rebuild the conversation from the backend so a reload doesn't wipe it.
+  useEffect(() => {
+    api.chat
+      .history()
+      .then((history) => {
+        if (history.length === 0) return;
+        setMessages((prev) => [
+          prev[0],
+          ...history.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            claims: m.claims ?? undefined,
+            createdAt: m.created_at,
+          })),
+        ]);
+      })
+      .catch((err) => console.error("Failed to load chat history:", err));
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };

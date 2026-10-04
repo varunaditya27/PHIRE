@@ -29,6 +29,14 @@ export interface ChatResponse {
   created_at: string;
 }
 
+export interface ChatMessageRead {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  claims: Claim[] | null;
+  created_at: string;
+}
+
 export interface DocumentUploadResponse {
   id: string;
   filename: string;
@@ -132,6 +140,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+    /** Persisted conversation, oldest first, to rebuild the chat after a reload. */
+    history: () => fetchAPI<ChatMessageRead[]>("/api/chat/messages"),
     /** Same turn as send(), reporting each pipeline stage while it runs. */
     stream: async (message: string, onProgress: (e: ProgressEvent) => void): Promise<ChatResponse> => {
       let result: ChatResponse | null = null;
@@ -168,6 +178,7 @@ export const api = {
         headers: {}, // fetchAPI won't override it because it's FormData
       });
     },
+    list: () => fetchAPI<DocumentRead[]>("/api/documents"),
     get: (id: string) => fetchAPI<DocumentRead>(`/api/documents/${id}`),
     /** Delete a document and everything derived from it (vectors, graph facts, file). */
     remove: async (id: string) => {

@@ -225,7 +225,37 @@ def build_lift_observations(
             "interpretation": obs.get("interpretation") or None,
             "effective": effective_date,
         })
+        if code == "Blood Pressure":
+            result.extend(_blood_pressure_components(val_str, unit, document_id, effective_date))
     return result
+
+
+def _blood_pressure_components(val_str: str, unit: str | None, document_id: str, effective_date: str | None) -> list[dict]:
+    """Numeric systolic/diastolic observations for a "148/92" reading.
+
+    The compound observation stays as-is (readable, and what NLI verifies a
+    "148/92" claim against) but has no numeric value, so it can't be charted
+    or trended. These two derived observations carry the numbers, which lets
+    the timeline plot BP and get_trend_facts report systolic/diastolic change.
+    """
+    match = _COMPOUND_VALUE_RE.match(val_str)
+    if not match:
+        return []
+    unit = unit or "mmHg"
+    systolic, diastolic = (float(n) for n in re.split(r"\s*/\s*", match.group(0)))
+    return [
+        {
+            "id": _stable_id(document_id, name),
+            "code": name,
+            "raw_value": f"{number:g} {unit}",
+            "value": number,
+            "unit": unit,
+            "reference_range": None,
+            "interpretation": None,
+            "effective": effective_date,
+        }
+        for name, number in (("Blood Pressure (Systolic)", systolic), ("Blood Pressure (Diastolic)", diastolic))
+    ]
 
 
 def write_observations(

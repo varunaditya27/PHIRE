@@ -60,10 +60,10 @@ PostgreSQL (SQLAlchemy)              Chroma (via ml/)      Neo4j (via ml/)
 | Prefix | Endpoints | Backed by |
 |---|---|---|
 | `/api/health` | `POST /api/health` | Postgres, Ollama, Chroma, Neo4j connectivity |
-| `/api/documents` | `POST /upload`, `POST /{id}/process`, `GET /{id}`, `DELETE /{id}`, `GET /{id}/events` (SSE) | `ml.rag.ingest`, `ml.graph` (background task); events from `services/progress.py` |
+| `/api/documents` | `GET ` (list), `POST /upload`, `POST /{id}/process`, `GET /{id}`, `DELETE /{id}`, `GET /{id}/events` (SSE) | `ml.rag.ingest`, `ml.graph` (background task); events from `services/progress.py` |
 | `/api/observations`, `/api/timeline` | `GET /api/observations`, `GET /api/timeline` | `ml.graph` (via `graph_reader.py`) |
 | `/api/search` | `GET /evidence` | `ml.rag.retriever.HybridRetriever` |
-| `/api/chat` | `POST /api/chat`, `POST /api/chat/stream` (SSE) | `ml.chains.qa_chain.QAChain` |
+| `/api/chat` | `POST /api/chat`, `POST /api/chat/stream` (SSE), `GET /api/chat/messages` | `ml.chains.qa_chain.QAChain` |
 | `/api/claims` | `POST /extract` | `ml.claims.extractor.ClaimExtractor` |
 | `/api/evidence` | `POST /retrieve`, `POST /verify` | `ml.rag.retriever`, `ml.claims.verifier` |
 | `/api/recommendations` | `GET /fitness`, `GET /nutrition` | `ml.recommendations.*` (nutrition is a stub — 501) |

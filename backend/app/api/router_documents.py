@@ -122,6 +122,12 @@ def reprocess_document(
     return DocumentUploadResponse(id=document.id, filename=document.filename, status=DocumentStatus.PROCESSING)
 
 
+@router.get("", response_model=list[DocumentRead])
+def list_documents(db: Session = Depends(get_db)) -> list[Document]:
+    """All uploaded documents, newest first -- the source of truth for the documents page."""
+    return db.query(Document).order_by(Document.uploaded_at.desc()).all()
+
+
 @router.get("/{document_id}", response_model=DocumentRead)
 def get_document(document_id: uuid.UUID, db: Session = Depends(get_db)) -> Document:
     document = db.get(Document, document_id)

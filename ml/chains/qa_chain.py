@@ -17,13 +17,13 @@ flowing answer. Revisit once this is validated end-to-end.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ml.claims.confidence import compute_confidence
 from ml.claims.extractor import ClaimExtractor
 from ml.claims.verifier import ClaimVerifier
 from ml.graph.client import GraphClient
-from ml.graph.patient_context import get_current_patient_facts, get_patient_facts, get_trend_facts
+from ml.graph.patient_context import get_current_patient_facts_with_sources, get_patient_facts, get_trend_facts
 from ml.llm.ollama_client import OllamaClient
 from ml.llm.prompt_builder import build_chat_prompt
 from ml.rag.reranker import Reranker
@@ -78,6 +78,8 @@ class ChatResponse:
 
     answer: str
     claims: list[VerifiedClaim]
+    # The reranked passages the answer was drafted from, for the API's `citations`.
+    evidence: list[Chunk] = field(default_factory=list)
 
 
 class QAChain:
@@ -151,7 +153,9 @@ class QAChain:
         # a new one (also verified live). Listed first so a patient fact
         # wins ties over a topically-similar reference chunk when both
         # score similarly informative.
-        patient_evidence = self._facts_to_chunks(current_facts, source="patient_record")
+        patient_evidence = self._facts_to_chunks(
+            [fact for fact, _ in current_facts], source="patient_record", filenames=[name for _, name in current_facts],
+        )
         # A trend claim ("your LDL increased 29 points") is arithmetic on
         # two Observations, not something NLI can verify against a single
         # fact sentence -- get_trend_facts precomputes the delta as its
@@ -170,10 +174,12 @@ class QAChain:
             verified.append(self._verify_claim(claim, verification_pool))
         supported = [c for c in verified if c.status in ("SUPPORTED", "DERIVED") and c.confidence >= ABSTENTION_THRESHOLD]
         answer = " ".join(c.claim for c in supported) if supported else NO_EVIDENCE_MESSAGE
-        return ChatResponse(answer=answer, claims=verified)
+        return ChatResponse(answer=answer, claims=verified, evidence=evidence)
 
-    def _graph_facts(self, need_history: bool) -> tuple[list[str], list[str], list[str]]:
-        """(history facts, current facts, trend facts) from the graph, or three empty
+    def _graph_facts(
+        self, need_history: bool,
+    ) -> tuple[list[str], list[tuple[str, str | None]], list[str]]:
+        """(history facts, (current fact, source filename) pairs, trend facts) from the graph, or three empty
         lists if Neo4j is unreachable.
 
         The graph layer is documented (CLAUDE.md) as "not MVP-blocking" --
@@ -191,7 +197,7 @@ class QAChain:
         try:
             if need_history:
                 history_facts = get_patient_facts(self._graph_client)
-            current_facts = get_current_patient_facts(self._graph_client)
+            current_facts = get_current_patient_facts_with_sources(self._graph_client)
             trend_facts = get_trend_facts(self._graph_client)
         except Exception as exc:  # noqa: BLE001 -- degrade, not crash; see docstring
             print(f"QAChain: graph unavailable, answering without patient-graph facts: {exc}")
@@ -199,7 +205,7 @@ class QAChain:
         return history_facts, current_facts, trend_facts
 
     @staticmethod
-    def _facts_to_chunks(facts: list[str], source: str) -> list[Chunk]:
+    def _facts_to_chunks(facts: list[str], source: str, filenames: list[str | None] | None = None) -> list[Chunk]:
         """Wrap plain-text graph facts as Chunks so the verifier can check claims against them.
 
         authority=1.0 matches PATIENT_DOCUMENT_AUTHORITY (reranker.py) --
@@ -215,9 +221,14 @@ class QAChain:
         if len(facts) > MAX_FACT_EVIDENCE:
             print(f"QAChain: capping {len(facts)} {source} facts to {MAX_FACT_EVIDENCE} for claim verification")
             facts = facts[:MAX_FACT_EVIDENCE]
+        filenames = filenames or [None] * len(facts)
         return [
-            Chunk(id=f"{source}_{i}", text=fact, metadata={"source": source, "authority": 1.0})
-            for i, fact in enumerate(facts)
+            Chunk(
+                id=f"{source}_{i}", text=fact,
+                # filename lets a verified claim cite which uploaded document the fact came from.
+                metadata={"source": source, "authority": 1.0, **({"filename": name} if name else {})},
+            )
+            for i, (fact, name) in enumerate(zip(facts, filenames))
         ]
 
     def _verify_claim(self, claim: str, evidence: list[Chunk]) -> VerifiedClaim:

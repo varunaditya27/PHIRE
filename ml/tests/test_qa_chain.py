@@ -159,8 +159,8 @@ def test_verify_claim_pool_includes_patient_facts_alongside_reference_evidence(m
             return verdicts[claim]
 
     monkeypatch.setattr(
-        "ml.chains.qa_chain.get_current_patient_facts",
-        lambda client: ["LDL Cholesterol: 162 mg/dL on 2026-03-10."],
+        "ml.chains.qa_chain.get_current_patient_facts_with_sources",
+        lambda client: [("LDL Cholesterol: 162 mg/dL on 2026-03-10.", "labs.pdf")],
     )
     chain = QAChain(
         retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
@@ -186,7 +186,7 @@ def test_answer_relabels_supported_trend_claim_as_derived(monkeypatch):
             return ClaimVerification(claim, "SUPPORTED", 0.9, 0.0, trend_chunk)
 
     monkeypatch.setattr(
-        "ml.chains.qa_chain.get_current_patient_facts", lambda client: [],
+        "ml.chains.qa_chain.get_current_patient_facts_with_sources", lambda client: [],
     )
     monkeypatch.setattr(
         "ml.chains.qa_chain.get_trend_facts",
@@ -252,7 +252,9 @@ def test_verification_pool_caps_patient_facts_at_max_fact_evidence(monkeypatch):
             return verdicts[claim]
 
     many_facts = [f"Fact number {i}." for i in range(MAX_FACT_EVIDENCE + 25)]
-    monkeypatch.setattr("ml.chains.qa_chain.get_current_patient_facts", lambda client: many_facts)
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.get_current_patient_facts_with_sources", lambda client: [(f, None) for f in many_facts],
+    )
     monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts", lambda client: [])
     chain = QAChain(
         retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
@@ -280,7 +282,9 @@ def test_verification_pool_caps_trend_facts_independently_of_patient_facts(monke
 
     many_trends = [f"Trend number {i}." for i in range(MAX_FACT_EVIDENCE + 10)]
     few_facts = ["LDL Cholesterol: 162 mg/dL on 2026-03-10."]
-    monkeypatch.setattr("ml.chains.qa_chain.get_current_patient_facts", lambda client: few_facts)
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.get_current_patient_facts_with_sources", lambda client: [(f, None) for f in few_facts],
+    )
     monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts", lambda client: many_trends)
     chain = QAChain(
         retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
@@ -330,3 +334,19 @@ def test_answer_reports_each_stage_in_order_via_on_progress():
 
     assert [stage for stage, _ in events] == ["graph", "retrieve", "generate", "extract", "verify", "verify"]
     assert events[-1][1].startswith("Verifying claim 2 of 2")
+
+
+def test_answer_exposes_the_retrieved_evidence_for_citations():
+    claims = ["Supported claim."]
+    verdicts = {"Supported claim.": ClaimVerification("Supported claim.", "SUPPORTED", 0.9, 0.0, EVIDENCE[0])}
+
+    response = build_chain(claims, verdicts).answer("question")
+
+    assert response.evidence == EVIDENCE
+
+
+def test_facts_to_chunks_attaches_source_filename_when_known():
+    chunks = QAChain._facts_to_chunks(["a", "b"], source="patient_record", filenames=["labs.pdf", None])
+
+    assert chunks[0].metadata["filename"] == "labs.pdf"
+    assert "filename" not in chunks[1].metadata

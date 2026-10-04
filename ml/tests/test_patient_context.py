@@ -144,3 +144,21 @@ def test_get_trend_facts_skips_unparseable_observations():
     ])
 
     assert get_trend_facts(client, patient_id="self") == []
+
+
+def test_current_facts_with_sources_carries_the_document_filename_per_fact():
+    from ml.graph.patient_context import get_current_patient_facts_with_sources
+
+    client = _FakeGraphClient(
+        observations=[{**_obs("LDL Cholesterol", "138 mg/dL", "2026-03-12", value=138.0), "filename": "march.pdf"}],
+        medications=[{"code": "Atorvastatin", "dosage": "20 mg", "frequency": "daily", "status": "active", "filename": "march.pdf"}],
+        conditions=[{"code": "Prediabetes", "status": "active"}],  # no filename row key: still works
+    )
+
+    pairs = get_current_patient_facts_with_sources(client, patient_id="self")
+
+    assert pairs == [
+        ("LDL Cholesterol: 138 mg/dL on 2026-03-12.", "march.pdf"),
+        ("Medication: Atorvastatin 20 mg daily (active).", "march.pdf"),
+        ("Condition: Prediabetes (active).", None),
+    ]

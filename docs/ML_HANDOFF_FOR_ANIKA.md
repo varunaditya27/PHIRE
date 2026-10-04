@@ -38,6 +38,7 @@ response.answer   # str — the final answer, built only from verified claims
 # stage starts (graph, retrieve, generate, extract, verify×n); the backend's SSE chat
 # endpoint uses it. Never affects results.
 response.claims   # list[VerifiedClaim] — full audit trail, including dropped claims
+response.evidence # list[Chunk] — the reranked passages the answer was drafted from (API `citations`)
 ```
 
 `VerifiedClaim` fields: `claim: str`, `status: str` (`SUPPORTED` /
@@ -48,7 +49,7 @@ str | None` (patient documents), `source_span: tuple[int, int] | None`
 (exact character offset in the source document — `None` for facts that
 aren't extracted verbatim, e.g. table rows; see §4). A claim whose
 `source_url` and `source_filename` are **both** `None` was verified
-against a graph fact (§3), not an ingested document — that's the
+against a *derived* graph fact (a trend computed across documents) or a graph fact with no recorded source document; direct patient-record facts now carry the uploaded `source_filename` (`get_current_patient_facts_with_sources`) — that's the
 reliable way to tell "this patient's own recorded data" apart from a
 document chunk at the same authority level, found necessary during live
 testing (see `docs/RESEARCH_LOG.md` §2 for why this distinction matters

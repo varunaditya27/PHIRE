@@ -75,7 +75,9 @@ The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generat
       "source_span": [120, 245]
     }
   ],
-  "citations": [],
+  "citations": [
+    { "evidence_passage_id": "...", "text": "...", "source_filename": "lab_report.pdf", "source_url": null, "authority": 1.0, "score": null }
+  ],
   "created_at": "2026-09-03T12:00:00Z"
 }
 ```
@@ -108,7 +110,16 @@ event: result
 data: {"id": "...", "answer": "...", "claims": [...], "citations": [], "created_at": "..."}
 ```
 
-*(Note: `GET /api/chat/messages` for loading chat history on page load is tracked on the backlog).*
+`citations` are the reranked passages the answer was drafted from (patient-document chunks and public reference pages, `score` is `null` here — only the search endpoints compute it). `DERIVED` claims have no `source_filename`: they restate a trend computed across several documents, so there is no single source file.
+
+### `GET /api/chat/messages?limit=200`
+The most recent `limit` persisted turns, **oldest first**, for rebuilding the conversation after a reload.
+```json
+[
+  { "id": "…", "role": "user", "content": "What is my LDL?", "claims": null, "created_at": "2026-10-04T13:00:00Z" },
+  { "id": "…", "role": "assistant", "content": "Your LDL is 112 mg/dL.", "claims": [ { "statement": "…", "status": "DERIVED", "confidence": 0.75, "…": "…" } ], "created_at": "…" }
+]
+```
 
 ---
 
@@ -153,7 +164,8 @@ Live ingestion progress for one document. `Content-Type: text/event-stream`; bro
 
 Each frame is `event: progress` with `data: {"stage": "...", "message": "..."}`. Stages, in order: `queued`, `gpu_wait` (only if another GPU task is running), `gpu` (loading vision models onto the GPU — evicts the chat models), `extract` (lift reading the document, ~1 min), `index` (embedding passages — loads chat models back), `graph` (writing labs/medications/conditions), then terminal `processed` (message `"Done"`) or `failed` (message = the error text). Returns `404` for an unknown id. History lives in backend memory: for a document with none (e.g. after a backend restart) the stream emits one event carrying its stored status and closes.
 
-*(Note: `GET /api/documents` to list all uploaded documents in PostgreSQL is tracked on the backlog).*
+### `GET /api/documents`
+All uploaded documents, newest first (`DocumentRead[]`, same shape as `GET /{document_id}`). The documents page uses this as its source of truth (no more `localStorage`).
 
 ---
 

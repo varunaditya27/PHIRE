@@ -424,6 +424,21 @@ First full live run of upload → lift → graph → timeline → chat since the
 
 ---
 
+## [0.7.2] - 2026-10-04
+
+### Persistence, blood pressure, citations
+
+**Added**
+- `GET /api/documents` (list, newest first) and `GET /api/chat/messages` (oldest first). The documents page now loads from the backend instead of `localStorage`; the chat page rebuilds the conversation on mount.
+- Blood pressure is numeric: `build_lift_observations` adds `Blood Pressure (Systolic)` and `(Diastolic)` observations alongside the compound `148/92 mmHg` one (kept for display and NLI). The dashboard charts them and chat reports systolic/diastolic trend deltas; the dashboard skips series with no numeric readings. Re-ingest documents to get the components for older uploads.
+- Chat `citations` is populated from `QAChain`'s new `ChatResponse.evidence` (the reranked passages the answer was drafted from).
+- Patient-record claims now cite their source document: graph fact queries join the `Document` node's filename (`get_current_patient_facts_with_sources`) and `QAChain` puts it in the verification chunk's metadata. `DERIVED` (trend) claims intentionally have no single source.
+- Tests: observation splitting, fact sources, evidence exposure; **227 passing.**
+
+**Docs updated:** `docs/API_REFERENCE.md`, `docs/BACKLOG.md`, `docs/FRONTEND_HANDOFF.md`, `docs/ML_HANDOFF_FOR_ANIKA.md`, `backend/README.md`.
+
+---
+
 ## Future Versions
 
 See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.

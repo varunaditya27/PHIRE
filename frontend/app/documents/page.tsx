@@ -14,22 +14,13 @@ export default function DocumentsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load documents from localStorage cache if any (since there's no list documents endpoint)
+  // The backend is the source of truth, so the list survives reloads and other devices.
   useEffect(() => {
-    const saved = localStorage.getItem("phire_documents");
-    if (saved) {
-      try {
-        setDocuments(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse saved docs", e);
-      }
-    }
+    api.documents
+      .list()
+      .then(setDocuments)
+      .catch((err) => setErrorMessage(err instanceof Error ? err.message : "Failed to load documents."));
   }, []);
-
-  const saveDocuments = (docs: DocumentRead[]) => {
-    setDocuments(docs);
-    localStorage.setItem("phire_documents", JSON.stringify(docs));
-  };
 
   const [progress, setProgress] = useState<Record<string, ProgressEvent[]>>({});
   const watching = useRef<Set<string>>(new Set());
@@ -45,11 +36,7 @@ export default function DocumentsPage() {
         watching.current.delete(id);
         try {
           const fresh = await api.documents.get(id);
-          setDocuments((prev) => {
-            const next = prev.map((d) => (d.id === id ? fresh : d));
-            localStorage.setItem("phire_documents", JSON.stringify(next));
-            return next;
-          });
+          setDocuments((prev) => prev.map((d) => (d.id === id ? fresh : d)));
         } catch (err) {
           console.error(`Failed to refresh doc ${id}:`, err);
         }
@@ -70,11 +57,7 @@ export default function DocumentsPage() {
     setErrorMessage(null);
     try {
       await api.documents.remove(doc.id);
-      setDocuments((prev) => {
-        const next = prev.filter((d) => d.id !== doc.id);
-        localStorage.setItem("phire_documents", JSON.stringify(next));
-        return next;
-      });
+      setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Failed to delete document.");
     }
@@ -105,8 +88,7 @@ export default function DocumentsPage() {
         error_message: null,
       };
 
-      const nextDocs = [newDoc, ...documents];
-      saveDocuments(nextDocs);
+      setDocuments((prev) => [newDoc, ...prev]);
 
       // Upload already queues processing server-side; just follow it.
       watchDocument(res.id);

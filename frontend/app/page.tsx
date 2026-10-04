@@ -35,10 +35,16 @@ export default function Dashboard() {
   // Transform timeline series into a flat array of data points for Recharts
   // Note: Recharts prefers an array of objects where each object is a point in time
   // { date: '2026-08-20', 'LDL Cholesterol': 162, 'Heart Rate': 72 }
+  // Series with no numeric reading (e.g. the compound "148/92" blood pressure, whose
+  // systolic/diastolic components are charted instead) have nothing to draw.
+  const plottableSeries = useMemo(
+    () => timeline?.series.filter(s => s.points.some(p => p.value_numeric !== null)) ?? [],
+    [timeline]
+  );
+
   const chartData = useMemo(() => {
-    if (!timeline?.series) return [];
     const dataByDate: Record<string, any> = {};
-    timeline.series.forEach(series => {
+    plottableSeries.forEach(series => {
       series.points.forEach(point => {
         if (!dataByDate[point.observed_date]) {
           dataByDate[point.observed_date] = { date: point.observed_date };
@@ -48,7 +54,7 @@ export default function Dashboard() {
     });
     // Sort by date
     return Object.values(dataByDate).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [timeline]);
+  }, [plottableSeries]);
 
   // Generate colors for lines based on DESIGN.md palette (oxide, ochre, ink)
   const colors = ["#8C3F2B", "#96742A", "#55503F", "#7A755F", "#9C9782"];
@@ -98,7 +104,7 @@ export default function Dashboard() {
                       itemStyle={{ color: 'var(--foreground)' }}
                     />
                     <Legend iconType="circle" wrapperStyle={{ fontSize: '14px' }} />
-                    {timeline?.series.map((series, idx) => (
+                    {plottableSeries.map((series, idx) => (
                       <Line 
                         key={series.name}
                         type="monotone" 

@@ -15,9 +15,9 @@ resolved or new ones are found; don't let it silently go stale.
 - **`frontend/` V1 is implemented** (Next.js 16, React 19, TailwindCSS) with Dashboard (`/`), Medical Chat (`/chat`), Document Ingestion (`/documents`), and Search & Claim Explorer (`/search`).
 - ~~**`EvidenceCitation.score` evaluates to `0.0%` in Search UI**~~ (fixed `[0.7.1]`: `/api/search/evidence` and `/api/evidence/retrieve` now rerank and return the cross-encoder relevance as `score`; via `app/services/evidence_search.py`). Original:
   `backend/app/services/citations.py:chunk_to_citation()` does not set `score` on `EvidenceCitation` (defaults to `None`), causing `frontend/app/search/page.tsx` to calculate `(null * 100).toFixed(1) => 0.0%`.
-- **Document history is isolated to browser `localStorage`**:
+- ~~**Document history is isolated to browser `localStorage`**~~ (fixed `[0.7.2]`: `GET /api/documents`). Original:
   Because backend has no `GET /api/documents` list endpoint, `frontend/app/documents/page.tsx` caches document IDs in `localStorage`. Clearing browser cache or switching devices loses the document list in the UI even though records exist in PostgreSQL.
-- **Chat conversation does not persist across page reloads**:
+- ~~**Chat conversation does not persist across page reloads**~~ (fixed `[0.7.2]`: `GET /api/chat/messages` + rehydration on mount). Original:
   Chat messages are saved in PostgreSQL `chat_messages` on the backend, but there is no `GET /api/chat/messages` endpoint to rehydrate `frontend/app/chat/page.tsx` upon page load.
 - ~~**Duplicate Document Processing Request**~~ (fixed `[0.7.0]`: documents page no longer calls `/process` after `/upload`; it follows `GET /api/documents/{id}/events`). Original description:
   `POST /api/documents/upload` automatically adds processing to `BackgroundTasks`, but `frontend/app/documents/page.tsx` immediately invokes `POST /api/documents/{id}/process`, frequently receiving `409 Conflict: "Document is already being processed."`.
@@ -38,9 +38,9 @@ resolved or new ones are found; don't let it silently go stale.
 
 - **No automated test suite** (partial: `ml/tests/test_document_processor.py`, `test_gpu_modes.py`, `test_progress.py` exercise some backend services, but there are no router/HTTP-level tests, including for the two SSE endpoints, which were only verified live with curl/Node):
   `ml/` has 217 tests (200 passing unit tests + 17 live integration tests) in `ml/tests/`; `backend/` has zero automated tests. A pytest suite with fixtures for all 8 routers is needed.
-- **Missing document listing endpoint (`GET /api/documents`)** (still open; `DELETE /api/documents/{id}` was added in `[0.7.1]`):
+- ~~**Missing document listing endpoint (`GET /api/documents`)**~~ (added `[0.7.2]`; `DELETE` in `[0.7.1]`). Original:
   Needed to query `documents` rows from PostgreSQL to support multi-device/refreshable document management in the frontend.
-- **Missing chat history endpoint (`GET /api/chat/messages`)**:
+- ~~**Missing chat history endpoint (`GET /api/chat/messages`)**~~ (added `[0.7.2]`). Original:
   Needed to serve past conversation turns with attached claims to the frontend chat UI.
 - **`claims.chat_message_id` Foreign Key lacks an index**:
   `backend/app/database/schemas.py` and Alembic migrations have FK constraints on `claims.chat_message_id`, but lack an explicit database index.
@@ -65,7 +65,7 @@ resolved or new ones are found; don't let it silently go stale.
   - Resolved via `CLINICAL_DOCUMENT_SCHEMA` and `LiftExtractor`. The schema-guided visual extraction retrieves lab values, units, reference ranges, flags, medications, and conditions directly into structured JSON, retiring the brittle regex HTML table parser and Ollama `qwen3.5:9b` prose extraction.
 - **`ClaimVerifier.verify()` unbatched sequential inference**:
   `ml/claims/verifier.py` runs one BART-large-MNLI forward pass per evidence chunk sequentially ($O(\text{claims} \times \text{evidence})$), creating high latency on turns with numerous claims. Needs tensor batching.
-- **Compound metrics omission (e.g. Blood Pressure)**:
+- ~~**Compound metrics omission (e.g. Blood Pressure)**~~ (fixed `[0.7.2]` for blood pressure: `build_lift_observations` adds numeric `Blood Pressure (Systolic)` / `(Diastolic)` observations next to the compound one, so it is charted and trended; other compound values are still not split). Original:
   `ml/graph/observations.py:_split_value()` explicitly rejects compound strings like `"148/92 mmHg"` returning `(None, None)` to prevent corruption, which omits blood pressure from numeric timeline charts and trend computations.
 - **USDA Key-Value NLI false uncertainty**:
   Terse key-value USDA reference text (`"Fish, salmon... per 100g: Protein 24.6 g"`) fails natural-language NLI entailment against conversational claims (`"Salmon is high in protein"` scores 0.301 entailment), causing false `UNCERTAIN` abstentions.
@@ -113,3 +113,7 @@ resolved or new ones are found; don't let it silently go stale.
 - No way to delete a document — `DELETE /api/documents/{id}` + a delete button on the documents page; verified against Chroma, Neo4j, disk and Postgres.
 
 Still open from the same review: blood pressure has no numeric value (not charted), chat `citations` is always `[]` (evidence is in `claims`), graph-fact claims (`DERIVED`) show no `source_filename`, document list / chat history don't persist across devices or reloads.
+
+## 7. Resolved in `[0.7.2]`
+
+Document list and chat history now persist server-side; blood pressure is numeric (charted, trended); chat `citations` is populated; patient-record claims cite their source document. Still open: `DERIVED` claims have no single `source_filename` by design; graph-fact claims for observations ingested before `[0.7.2]` have a filename only if the `Document` node has one (all current writers set it).
