@@ -76,6 +76,7 @@ def verify_claim(request: EvidenceVerifyRequest) -> EvidenceVerifyResponse:
         confidence=confidence,
         source_url=metadata.get("url"),
         source_filename=metadata.get("filename"),
+        source_filenames=[metadata["filename"]] if metadata.get("filename") else [],
         source_span=source_span,
     )
     return EvidenceVerifyResponse(claim=claim)

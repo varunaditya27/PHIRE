@@ -93,6 +93,19 @@ Both long waits show live progress over Server-Sent Events: uploads display each
 
 ---
 
+### Start from scratch (clear demo/test data)
+
+Before a real user ingests their own records, wipe everything left over from development:
+
+```bash
+PYTHONPATH=. ml/.venv/bin/python scripts/reset_data.py --dry-run   # show targets + counts, change nothing
+PYTHONPATH=. ml/.venv/bin/python scripts/reset_data.py             # asks you to type RESET
+```
+
+It clears, using the targets in `backend/.env`: PostgreSQL (`documents`, `chat_messages`, `claims`, `audit_log`), the whole Neo4j health graph, **patient-document chunks** in Chroma, and uploaded files + the audit log file. Flags: `--keep-audit` (keep audit rows/file), `--include-reference` (also wipe the public reference corpus), `--yes` (skip the prompt). Restart the backend afterwards.
+
+**Why the reference corpus is kept by default:** it is not user data. It is the public medical knowledge (MedlinePlus, PubMed abstracts, USDA nutrition) PHIRE retrieves from to ground general statements — without it a claim like "statins lower LDL" has nothing to be verified against and comes back unsupported, so answers could only restate the user's own records. It was ingested once with `ml/rag/ingest/run_ingest.py` (needs network); wiping it means re-running that.
+
 ## 📊 Features & Status
 
 **Core**

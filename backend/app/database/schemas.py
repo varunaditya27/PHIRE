@@ -75,6 +75,7 @@ class Claim(Base):
     confidence: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     source_url: Mapped[str | None] = mapped_column(String, nullable=True)
     source_filename: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_filenames: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # every document the claim rests on
     source_span_start: Mapped[int | None] = mapped_column(nullable=True)
     source_span_end: Mapped[int | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

@@ -20,6 +20,7 @@ from html.parser import HTMLParser
 import re
 
 from ml.graph.client import GraphClient
+from ml.graph.composite_readings import expand
 from ml.graph.document_dates import find_document_date
 from ml.graph.metric_resolver import resolve_metric
 
@@ -225,37 +226,29 @@ def build_lift_observations(
             "interpretation": obs.get("interpretation") or None,
             "effective": effective_date,
         })
-        if code == "Blood Pressure":
-            result.extend(_blood_pressure_components(val_str, unit, document_id, effective_date))
+        expansion = expand(code, val_str, unit)
+        if expansion:
+            if expansion.primary:
+                result[-1]["value"], result[-1]["unit"] = expansion.primary
+            result.extend(
+                _derived_observation(name, number, derived_unit, document_id, effective_date)
+                for name, number, derived_unit in expansion.extras
+            )
     return result
 
 
-def _blood_pressure_components(val_str: str, unit: str | None, document_id: str, effective_date: str | None) -> list[dict]:
-    """Numeric systolic/diastolic observations for a "148/92" reading.
-
-    The compound observation stays as-is (readable, and what NLI verifies a
-    "148/92" claim against) but has no numeric value, so it can't be charted
-    or trended. These two derived observations carry the numbers, which lets
-    the timeline plot BP and get_trend_facts report systolic/diastolic change.
-    """
-    match = _COMPOUND_VALUE_RE.match(val_str)
-    if not match:
-        return []
-    unit = unit or "mmHg"
-    systolic, diastolic = (float(n) for n in re.split(r"\s*/\s*", match.group(0)))
-    return [
-        {
-            "id": _stable_id(document_id, name),
-            "code": name,
-            "raw_value": f"{number:g} {unit}",
-            "value": number,
-            "unit": unit,
-            "reference_range": None,
-            "interpretation": None,
-            "effective": effective_date,
-        }
-        for name, number in (("Blood Pressure (Systolic)", systolic), ("Blood Pressure (Diastolic)", diastolic))
-    ]
+def _derived_observation(code: str, value: float, unit: str, document_id: str, effective_date: str | None) -> dict:
+    """A numeric observation derived from one part of a composite reading (see composite_readings.py)."""
+    return {
+        "id": _stable_id(document_id, code),
+        "code": code,
+        "raw_value": f"{value:g} {unit}",
+        "value": value,
+        "unit": unit,
+        "reference_range": None,
+        "interpretation": None,
+        "effective": effective_date,
+    }
 
 
 def write_observations(

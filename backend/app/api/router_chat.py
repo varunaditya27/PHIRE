@@ -66,6 +66,7 @@ def run_chat(db: Session, message: str, on_progress: Callable[[str, str], None] 
             confidence=c.confidence,
             source_url=c.source_url,
             source_filename=c.source_filename,
+            source_filenames=c.source_filenames,
             source_span=c.source_span,
         )
         for c in chain_response.claims
@@ -91,6 +92,7 @@ def run_chat(db: Session, message: str, on_progress: Callable[[str, str], None] 
                 confidence=claim.confidence,
                 source_url=claim.source_url,
                 source_filename=claim.source_filename,
+                source_filenames=claim.source_filenames,
                 source_span_start=claim.source_span[0] if claim.source_span else None,
                 source_span_end=claim.source_span[1] if claim.source_span else None,
             )

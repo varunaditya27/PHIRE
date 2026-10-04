@@ -38,6 +38,8 @@ response.answer   # str — the final answer, built only from verified claims
 # stage starts (graph, retrieve, generate, extract, verify×n); the backend's SSE chat
 # endpoint uses it. Never affects results.
 response.claims   # list[VerifiedClaim] — full audit trail, including dropped claims
+# VerifiedClaim.source_filenames: list[str] — every uploaded document the claim rests on (a trend lists both readings' files);
+# source_filename is its first entry.
 response.evidence # list[Chunk] — the reranked passages the answer was drafted from (API `citations`)
 ```
 
@@ -334,3 +336,8 @@ this doc:
 - `ml/graph/experiments/RESULTS.md` — historical prose extraction benchmark (HandRolled + qwen3.5:9b, superseded by `datalab-to/lift`)
 - `ml/rag/reranker_experiments/RESULTS.md` — reranker weight tuning + the patient-document floor fix
 - `docs/GRAPH_SCHEMA_ROADMAP.md` — what's deliberately deferred in the graph schema, and the trigger condition for each
+
+
+## 6. Composite readings (added 2026-10-04)
+
+`ml/graph/composite_readings.py` is a small registry for single values that are really several numbers, applied by `build_lift_observations`: blood pressure `148/92 mmHg, pulse 74` → `Blood Pressure (Systolic)`, `(Diastolic)` and `Heart Rate` observations (the compound text observation is kept for display/NLI); Snellen acuity `20/40` → decimal `0.5` stored on the observation itself; height `5'9"` → `175.3 cm`. Matching is on the base name, so `Visual acuity (right eye)` / `Blood Pressure (sitting)` match and the qualifier is preserved on derived names (each eye/posture stays its own series). Anything unregistered — ratios like `A/G 1.2/1`, dates — is left untouched on purpose; add a handler + dict entry to support a new shape. HbA1c `6.1 % (43 mmol/mol)` is one observation (the first number), not split.

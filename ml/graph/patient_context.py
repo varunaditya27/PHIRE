@@ -115,7 +115,14 @@ def get_current_patient_facts_with_sources(
 
 
 def get_trend_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID) -> list[str]:
-    """One sentence per metric with 2+ numeric readings: change from the previous reading to the latest.
+    """Trend sentences only; see get_trend_facts_with_sources."""
+    return [fact for fact, _ in get_trend_facts_with_sources(client, patient_id)]
+
+
+def get_trend_facts_with_sources(
+    client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID,
+) -> list[tuple[str, list[str]]]:
+    """(sentence, source filenames) per metric with 2+ numeric readings: change from the previous reading to the latest.
 
     Deliberately just latest-vs-previous, not a full multi-point trend
     line -- matches docs/AGGRESSIVE_ROADMAP.md's own scope ("simple:
@@ -144,8 +151,12 @@ def get_trend_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID) -
         delta = latest["value"] - previous["value"]
         direction = "an increase" if delta > 0 else "a decrease" if delta < 0 else "no change"
         unit = latest["unit"] or ""
-        facts.append(
+        # Both readings are evidence for a trend, and they often come from different
+        # documents -- cite every file involved, not just the newest.
+        sources = list(dict.fromkeys(r["filename"] for r in (previous, latest) if r.get("filename")))
+        facts.append((
             f"{code} changed from {previous['raw_value']} on {previous['effective']} "
-            f"to {latest['raw_value']} on {latest['effective']} ({direction} of {abs(delta):.1f} {unit}).".replace("  ", " ")
-        )
+            f"to {latest['raw_value']} on {latest['effective']} ({direction} of {abs(delta):.1f} {unit}).".replace("  ", " "),
+            sources,
+        ))
     return facts

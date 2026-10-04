@@ -65,7 +65,7 @@ resolved or new ones are found; don't let it silently go stale.
   - Resolved via `CLINICAL_DOCUMENT_SCHEMA` and `LiftExtractor`. The schema-guided visual extraction retrieves lab values, units, reference ranges, flags, medications, and conditions directly into structured JSON, retiring the brittle regex HTML table parser and Ollama `qwen3.5:9b` prose extraction.
 - **`ClaimVerifier.verify()` unbatched sequential inference**:
   `ml/claims/verifier.py` runs one BART-large-MNLI forward pass per evidence chunk sequentially ($O(\text{claims} \times \text{evidence})$), creating high latency on turns with numerous claims. Needs tensor batching.
-- ~~**Compound metrics omission (e.g. Blood Pressure)**~~ (fixed `[0.7.2]` for blood pressure: `build_lift_observations` adds numeric `Blood Pressure (Systolic)` / `(Diastolic)` observations next to the compound one, so it is charted and trended; other compound values are still not split). Original:
+- ~~**Compound metrics omission (e.g. Blood Pressure)**~~ (fixed `[0.7.2]`/`[0.7.3]`: `ml/graph/composite_readings.py` registry — blood pressure (+ pulse) → systolic/diastolic/heart rate, Snellen acuity → decimal, feet-inches height → cm; unregistered a/b values such as ratios are deliberately left whole). Original:
   `ml/graph/observations.py:_split_value()` explicitly rejects compound strings like `"148/92 mmHg"` returning `(None, None)` to prevent corruption, which omits blood pressure from numeric timeline charts and trend computations.
 - **USDA Key-Value NLI false uncertainty**:
   Terse key-value USDA reference text (`"Fish, salmon... per 100g: Protein 24.6 g"`) fails natural-language NLI entailment against conversational claims (`"Salmon is high in protein"` scores 0.301 entailment), causing false `UNCERTAIN` abstentions.
@@ -117,3 +117,11 @@ Still open from the same review: blood pressure has no numeric value (not charte
 ## 7. Resolved in `[0.7.2]`
 
 Document list and chat history now persist server-side; blood pressure is numeric (charted, trended); chat `citations` is populated; patient-record claims cite their source document. Still open: `DERIVED` claims have no single `source_filename` by design; graph-fact claims for observations ingested before `[0.7.2]` have a filename only if the `Document` node has one (all current writers set it).
+
+## 8. Resolved in `[0.7.3]`
+
+- Every claim cites all its source documents (`source_filenames`), including both readings' files for a trend.
+- Composite readings beyond blood pressure (acuity, height, BP with pulse; laterality/posture qualifiers preserved).
+- `scripts/reset_data.py` for a clean start (README "Start from scratch").
+
+Still open: compound/composite shapes outside the registry (e.g. orthostatic "supine 148/92, standing 130/80" in one value, paediatric "lb oz" weights, comparator values like `>90`) are left as text; the registry is one dict entry per shape. HbA1c dual units are intentionally one observation (first number = the %).

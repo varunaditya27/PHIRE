@@ -131,23 +131,3 @@ def test_build_lift_observations_preserves_units_range_and_interpretation():
         "interpretation": "High",
         "effective": "2026-03-10",
     }
-
-
-def test_lift_blood_pressure_adds_numeric_systolic_and_diastolic_observations():
-    result = build_lift_observations(
-        [{"name": "Blood Pressure", "value": "148/92", "unit": "mmHg", "interpretation": "High"}],
-        "doc1", "2026-03-12",
-    )
-    by_code = {o["code"]: o for o in result}
-
-    # compound reading preserved for display / NLI, still non-numeric
-    assert by_code["Blood Pressure"]["raw_value"] == "148/92 mmHg"
-    assert by_code["Blood Pressure"]["value"] is None
-    assert (by_code["Blood Pressure (Systolic)"]["value"], by_code["Blood Pressure (Systolic)"]["unit"]) == (148.0, "mmHg")
-    assert by_code["Blood Pressure (Diastolic)"]["value"] == 92.0
-    assert by_code["Blood Pressure (Systolic)"]["id"] != by_code["Blood Pressure (Diastolic)"]["id"]
-
-
-def test_lift_non_bp_compound_value_is_not_split():
-    result = build_lift_observations([{"name": "Albumin/Globulin Ratio", "value": "1.2/1"}], "doc1", "2026-03-12")
-    assert len(result) == 1

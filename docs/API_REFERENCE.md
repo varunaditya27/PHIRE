@@ -72,6 +72,7 @@ The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generat
       "confidence": 0.866,
       "source_url": null,
       "source_filename": "lab_report_2026.pdf",
+      "source_filenames": ["lab_report_2026.pdf"],
       "source_span": [120, 245]
     }
   ],
@@ -110,7 +111,7 @@ event: result
 data: {"id": "...", "answer": "...", "claims": [...], "citations": [], "created_at": "..."}
 ```
 
-`citations` are the reranked passages the answer was drafted from (patient-document chunks and public reference pages, `score` is `null` here — only the search endpoints compute it). `DERIVED` claims have no `source_filename`: they restate a trend computed across several documents, so there is no single source file.
+`citations` are the reranked passages the answer was drafted from (patient-document chunks and public reference pages, `score` is `null` here — only the search endpoints compute it). Every claim carries **`source_filenames`**: all uploaded documents it rests on. A `DERIVED` trend claim lists the documents of *both* readings (e.g. `["march.pdf", "sept.png"]`); `source_filename` is the first of them, kept for older clients. Claims backed only by a public reference carry `source_url` instead and an empty `source_filenames`.
 
 ### `GET /api/chat/messages?limit=200`
 The most recent `limit` persisted turns, **oldest first**, for rebuilding the conversation after a reload.

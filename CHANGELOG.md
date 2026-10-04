@@ -439,6 +439,20 @@ First full live run of upload → lift → graph → timeline → chat since the
 
 ---
 
+## [0.7.3] - 2026-10-04
+
+### All sources cited, composite readings, reset script
+
+**Added**
+- **Every claim cites all its source documents.** `VerifiedClaim.source_filenames` / API `Claim.source_filenames` (plus `claims.source_filenames` JSONB column, Alembic `a1c4e7f9b2d3`). `get_trend_facts_with_sources` attaches both readings' filenames (deduplicated), so a trend claim now cites e.g. `["sample_lab.pdf", "scan2.png"]`; `source_filename` stays as the first for older clients. Chat and search UIs list every file and the reference URL; `Claim.source_span` is now typed `[number, number]`.
+- `ml/graph/composite_readings.py`: registry of composite readings chosen from common clinical practice (LOINC BP panel, Snellen, ft/in) — blood pressure with optional pulse → systolic/diastolic/heart rate; Snellen `20/40` → decimal; `5'9"` → cm. Base-name matching keeps qualifiers (`(right eye)`, `(sitting)`) on derived observations. Unregistered `a/b` values (ratios) are never split. New aliases in `metric_resolver`: Heart Rate, Visual Acuity, Height. Verified on a real lift extraction.
+- `scripts/reset_data.py`: wipes Postgres (`documents`, `chat_messages`, `claims`, `audit_log`), the Neo4j graph, Chroma patient chunks and uploaded files/audit log for a clean start. `--dry-run`, typed `RESET` confirmation (or `--yes`), `--keep-audit`, `--include-reference` (reference corpus kept by default). Verified end-to-end on a scratch Postgres/Neo4j/Chroma, never on dev data.
+- Tests: composite registry (28), source-filename propagation, reset script on temp dirs; **259 passing**.
+
+**Docs updated:** `README.md` (reset section), `REPO_STRUCTURE.md`, `docs/API_REFERENCE.md`, `docs/BACKLOG.md`, `docs/ML_HANDOFF_FOR_ANIKA.md`, `ml/README.md`.
+
+---
+
 ## Future Versions
 
 See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.

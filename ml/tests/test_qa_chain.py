@@ -189,8 +189,8 @@ def test_answer_relabels_supported_trend_claim_as_derived(monkeypatch):
         "ml.chains.qa_chain.get_current_patient_facts_with_sources", lambda client: [],
     )
     monkeypatch.setattr(
-        "ml.chains.qa_chain.get_trend_facts",
-        lambda client: ["LDL Cholesterol changed from 191 mg/dL to 162 mg/dL (a decrease of 29.0 mg/dL)."],
+        "ml.chains.qa_chain.get_trend_facts_with_sources",
+        lambda client: [("LDL Cholesterol changed from 191 mg/dL to 162 mg/dL (a decrease of 29.0 mg/dL).", ["jan.pdf", "mar.pdf"])],
     )
     chain = QAChain(
         retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor([claim]),
@@ -255,7 +255,7 @@ def test_verification_pool_caps_patient_facts_at_max_fact_evidence(monkeypatch):
     monkeypatch.setattr(
         "ml.chains.qa_chain.get_current_patient_facts_with_sources", lambda client: [(f, None) for f in many_facts],
     )
-    monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts", lambda client: [])
+    monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts_with_sources", lambda client: [])
     chain = QAChain(
         retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
         verifier=RecordingVerifier(), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
@@ -285,7 +285,9 @@ def test_verification_pool_caps_trend_facts_independently_of_patient_facts(monke
     monkeypatch.setattr(
         "ml.chains.qa_chain.get_current_patient_facts_with_sources", lambda client: [(f, None) for f in few_facts],
     )
-    monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts", lambda client: many_trends)
+    monkeypatch.setattr(
+        "ml.chains.qa_chain.get_trend_facts_with_sources", lambda client: [(t, []) for t in many_trends],
+    )
     chain = QAChain(
         retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
         verifier=RecordingVerifier(), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
@@ -346,7 +348,34 @@ def test_answer_exposes_the_retrieved_evidence_for_citations():
 
 
 def test_facts_to_chunks_attaches_source_filename_when_known():
-    chunks = QAChain._facts_to_chunks(["a", "b"], source="patient_record", filenames=["labs.pdf", None])
+    chunks = QAChain._facts_to_chunks(["a", "b"], source="patient_record", filenames=[["labs.pdf"], []])
 
-    assert chunks[0].metadata["filename"] == "labs.pdf"
-    assert "filename" not in chunks[1].metadata
+    assert chunks[0].metadata["filenames"] == ["labs.pdf"]
+    assert "filenames" not in chunks[1].metadata
+
+
+def test_trend_claim_cites_every_source_document():
+    claim = "LDL decreased by 29 mg/dL."
+    trend = "LDL Cholesterol changed from 191 mg/dL to 162 mg/dL (a decrease of 29.0 mg/dL)."
+
+    class TrendVerifier:
+        def verify(self, claim, evidence):
+            chunk = next(c for c in evidence if c.metadata.get("source") == "patient_derived")
+            return ClaimVerification(claim, "SUPPORTED", 0.9, 0.0, chunk)
+
+    import ml.chains.qa_chain as qa
+    original_current, original_trend = qa.get_current_patient_facts_with_sources, qa.get_trend_facts_with_sources
+    qa.get_current_patient_facts_with_sources = lambda client: []
+    qa.get_trend_facts_with_sources = lambda client: [(trend, ["jan.pdf", "mar.pdf"])]
+    try:
+        chain = QAChain(
+            retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor([claim]),
+            verifier=TrendVerifier(), llm_client=FakeLLM(), graph_client=FakeGraphClient(),
+        )
+        verified = chain.answer("question").claims[0]
+    finally:
+        qa.get_current_patient_facts_with_sources, qa.get_trend_facts_with_sources = original_current, original_trend
+
+    assert verified.status == "DERIVED"
+    assert verified.source_filenames == ["jan.pdf", "mar.pdf"]
+    assert verified.source_filename == "jan.pdf"

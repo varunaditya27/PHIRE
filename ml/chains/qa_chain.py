@@ -23,7 +23,11 @@ from ml.claims.confidence import compute_confidence
 from ml.claims.extractor import ClaimExtractor
 from ml.claims.verifier import ClaimVerifier
 from ml.graph.client import GraphClient
-from ml.graph.patient_context import get_current_patient_facts_with_sources, get_patient_facts, get_trend_facts
+from ml.graph.patient_context import (
+    get_current_patient_facts_with_sources,
+    get_patient_facts,
+    get_trend_facts_with_sources,
+)
 from ml.llm.ollama_client import OllamaClient
 from ml.llm.prompt_builder import build_chat_prompt
 from ml.rag.reranker import Reranker
@@ -70,6 +74,9 @@ class VerifiedClaim:
     source_url: str | None
     source_filename: str | None
     source_span: tuple[int, int] | None
+    # Every uploaded document the claim rests on: a trend spans the two readings'
+    # documents, so one filename is not enough. source_filename is the first of these.
+    source_filenames: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -120,7 +127,8 @@ class QAChain:
         """
         progress = on_progress or (lambda stage, message: None)
         progress("graph", "Reading your health records")
-        history_facts, current_facts, trend_facts = self._graph_facts(need_history=observations is None)
+        history_facts, current_facts, trend_pairs = self._graph_facts(need_history=observations is None)
+        trend_facts = [fact for fact, _ in trend_pairs]
         if observations is None:
             observations = history_facts + trend_facts
 
@@ -154,7 +162,8 @@ class QAChain:
         # wins ties over a topically-similar reference chunk when both
         # score similarly informative.
         patient_evidence = self._facts_to_chunks(
-            [fact for fact, _ in current_facts], source="patient_record", filenames=[name for _, name in current_facts],
+            [fact for fact, _ in current_facts], source="patient_record",
+            filenames=[[name] if name else [] for _, name in current_facts],
         )
         # A trend claim ("your LDL increased 29 points") is arithmetic on
         # two Observations, not something NLI can verify against a single
@@ -163,7 +172,9 @@ class QAChain:
         # can relabel a match here as DERIVED rather than SUPPORTED (see
         # ml/claims/verifier.py's docstring for why DERIVED can't be
         # implemented as an NLI-only distinction).
-        derived_evidence = self._facts_to_chunks(trend_facts, source="patient_derived")
+        derived_evidence = self._facts_to_chunks(
+            trend_facts, source="patient_derived", filenames=[names for _, names in trend_pairs],
+        )
         verification_pool = patient_evidence + derived_evidence + evidence
 
         progress("extract", "Splitting the draft into checkable claims")
@@ -178,8 +189,8 @@ class QAChain:
 
     def _graph_facts(
         self, need_history: bool,
-    ) -> tuple[list[str], list[tuple[str, str | None]], list[str]]:
-        """(history facts, (current fact, source filename) pairs, trend facts) from the graph, or three empty
+    ) -> tuple[list[str], list[tuple[str, str | None]], list[tuple[str, list[str]]]]:
+        """(history facts, (current fact, source filename) pairs, (trend fact, source filenames) pairs) from the graph, or three empty
         lists if Neo4j is unreachable.
 
         The graph layer is documented (CLAUDE.md) as "not MVP-blocking" --
@@ -188,7 +199,7 @@ class QAChain:
         lose the patient-specific/trend grounding for that turn. Fetched
         together in one try/except (not one per call site) so a partial
         graph outage can't leave observations/current_facts/trend_facts
-        in an inconsistent mix of real and empty. get_trend_facts is only
+        in an inconsistent mix of real and empty. The trend query is only
         computed once, reused for both the prompt-context `observations`
         and the trend-claim verification pool below, instead of querying
         the graph for the identical result twice.
@@ -198,14 +209,14 @@ class QAChain:
             if need_history:
                 history_facts = get_patient_facts(self._graph_client)
             current_facts = get_current_patient_facts_with_sources(self._graph_client)
-            trend_facts = get_trend_facts(self._graph_client)
+            trend_facts = get_trend_facts_with_sources(self._graph_client)
         except Exception as exc:  # noqa: BLE001 -- degrade, not crash; see docstring
             print(f"QAChain: graph unavailable, answering without patient-graph facts: {exc}")
             return [], [], []
         return history_facts, current_facts, trend_facts
 
     @staticmethod
-    def _facts_to_chunks(facts: list[str], source: str, filenames: list[str | None] | None = None) -> list[Chunk]:
+    def _facts_to_chunks(facts: list[str], source: str, filenames: list[list[str]] | None = None) -> list[Chunk]:
         """Wrap plain-text graph facts as Chunks so the verifier can check claims against them.
 
         authority=1.0 matches PATIENT_DOCUMENT_AUTHORITY (reranker.py) --
@@ -221,14 +232,14 @@ class QAChain:
         if len(facts) > MAX_FACT_EVIDENCE:
             print(f"QAChain: capping {len(facts)} {source} facts to {MAX_FACT_EVIDENCE} for claim verification")
             facts = facts[:MAX_FACT_EVIDENCE]
-        filenames = filenames or [None] * len(facts)
+        filenames = filenames or [[] for _ in facts]
         return [
             Chunk(
                 id=f"{source}_{i}", text=fact,
-                # filename lets a verified claim cite which uploaded document the fact came from.
-                metadata={"source": source, "authority": 1.0, **({"filename": name} if name else {})},
+                # filenames lets a verified claim cite every uploaded document the fact came from.
+                metadata={"source": source, "authority": 1.0, **({"filenames": names} if names else {})},
             )
-            for i, (fact, name) in enumerate(zip(facts, filenames))
+            for i, (fact, names) in enumerate(zip(facts, filenames))
         ]
 
     def _verify_claim(self, claim: str, evidence: list[Chunk]) -> VerifiedClaim:
@@ -261,7 +272,10 @@ class QAChain:
         source_span = None
         if "char_start" in metadata and "char_end" in metadata:
             source_span = (metadata["char_start"], metadata["char_end"])
+        # Graph facts carry a list of source files; Chroma passages carry a single filename.
+        filenames = metadata.get("filenames") or ([metadata["filename"]] if metadata.get("filename") else [])
         return VerifiedClaim(
             claim=claim, status=status, confidence=confidence,
-            source_url=metadata.get("url"), source_filename=metadata.get("filename"), source_span=source_span,
+            source_url=metadata.get("url"), source_filename=filenames[0] if filenames else None,
+            source_span=source_span, source_filenames=filenames,
         )

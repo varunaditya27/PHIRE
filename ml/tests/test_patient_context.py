@@ -162,3 +162,18 @@ def test_current_facts_with_sources_carries_the_document_filename_per_fact():
         ("Medication: Atorvastatin 20 mg daily (active).", "march.pdf"),
         ("Condition: Prediabetes (active).", None),
     ]
+
+
+def test_trend_facts_with_sources_cites_both_readings_documents_once_each():
+    from ml.graph.patient_context import get_trend_facts_with_sources
+
+    client = _FakeGraphClient(observations=[
+        {**_obs("LDL Cholesterol", "138 mg/dL", "2026-03-12", value=138.0, unit="mg/dL"), "filename": "march.pdf"},
+        {**_obs("LDL Cholesterol", "112 mg/dL", "2026-09-05", value=112.0, unit="mg/dL"), "filename": "sept.png"},
+        {**_obs("HbA1c", "6.1 %", "2026-03-12", value=6.1, unit="%"), "filename": "march.pdf"},
+        {**_obs("HbA1c", "5.8 %", "2026-09-05", value=5.8, unit="%"), "filename": "march.pdf"},  # same file twice
+    ])
+
+    sources = {fact.split(" changed")[0]: names for fact, names in get_trend_facts_with_sources(client, patient_id="self")}
+
+    assert sources == {"LDL Cholesterol": ["march.pdf", "sept.png"], "HbA1c": ["march.pdf"]}

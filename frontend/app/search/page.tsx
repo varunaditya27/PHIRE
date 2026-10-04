@@ -259,7 +259,7 @@ export default function SearchPage() {
                 <div className="p-3 rounded-lg bg-secondary/50 border border-border">
                   <span className="text-muted-foreground block mb-1">Evidence Source</span>
                   <span className="font-medium text-foreground truncate block">
-                    {verifiedClaim.source_filename || "Knowledge graph fact / no direct citation"}
+                    {verifiedClaim.source_filenames?.join(", ") || verifiedClaim.source_url || "Knowledge graph fact / no direct citation"}
                   </span>
                 </div>
               </div>

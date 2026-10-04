@@ -29,6 +29,9 @@ _METRIC_ALIASES: dict[str, list[str]] = {
     "Creatinine": ["creat"],
     "Calcium": ["ca"],
     "Blood Pressure": ["bp"],
+    "Heart Rate": ["pulse", "pulse rate", "hr"],
+    "Visual Acuity": ["va", "vision", "eyesight"],
+    "Height": ["ht", "body height", "stature"],
 }
 
 # Reverse index built once at import time: lowercased alias -> canonical name.

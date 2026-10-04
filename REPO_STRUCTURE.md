@@ -182,7 +182,8 @@ phire/
 │   ├── setup.sh                    # Shared environment & venv setup
 │   ├── run.sh                      # Full-stack docker compose startup
 │   ├── run_backend.sh              # Local FastAPI runner with Alembic migrations & PYTHONPATH
-│   └── run_frontend.sh             # Local Next.js runner
+│   ├── run_frontend.sh             # Local Next.js runner
+│   └── reset_data.py               # Wipe patient data from Postgres/Neo4j/Chroma/uploads (see README)
 │
 ├── data/
 │   ├── chroma/                     # Chroma persistent vector store

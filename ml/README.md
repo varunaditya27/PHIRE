@@ -151,6 +151,7 @@ for claim in response.claims:
 - [x] Reference corpus ingestion: PubMed, MedlinePlus, USDA FoodData Central
 - [x] Backend API integration: FastAPI routers, `ml_singletons`, LIFT/CHAT GPU modes (`gpu_modes.py`), SSE progress (`POST /api/chat/stream`, `GET /api/documents/{id}/events`; `QAChain.answer(on_progress=...)`), HIPAA audit logging
 - [x] Live end-to-end pipeline tests (real Ollama + Neo4j + Chroma, no fakes)
+- [x] Composite readings registry (`ml/graph/composite_readings.py`): BP(+pulse), Snellen acuity, feet-inches height — verified on a real lift extraction
 - [x] Real-model lift run verified (2026-10-04): synthetic lab PDF → 6 labs / 2 meds / 2 conditions correct, incl. compound `148/92 mmHg`
 - [x] Test suite defaults to mock lift (`ml/tests/conftest.py`); 220 tests pass with Neo4j on the env vars below. `test_retriever_integration.py` and `test_qa_chain_live_e2e.py` need free GPU memory / live infra — stop the backend first or deselect.
 

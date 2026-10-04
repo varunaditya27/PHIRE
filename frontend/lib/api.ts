@@ -18,7 +18,9 @@ export interface Claim {
   confidence: number | null;
   source_url: string | null;
   source_filename: string | null;
-  source_span: string | null;
+  /** Every uploaded document the claim rests on; a trend spans the documents of both readings. */
+  source_filenames: string[];
+  source_span: [number, number] | null;
 }
 
 export interface ChatResponse {

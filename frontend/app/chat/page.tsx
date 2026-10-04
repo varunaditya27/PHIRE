@@ -229,13 +229,25 @@ export default function ChatPage() {
                               "{claim.statement}"
                             </p>
 
-                            {(claim.source_filename || claim.source_span) && (
-                              <div className="flex items-center text-[11px] text-[var(--evidence)] gap-1.5 pt-1">
-                                <FileCheck className="w-3.5 h-3.5 flex-shrink-0" />
-                                <span className="truncate font-[family-name:var(--font-mono)]">
-                                  {claim.source_filename || "Clinical graph fact"}
-                                  {claim.source_span ? ` (${claim.source_span})` : ""}
-                                </span>
+                            {(claim.source_filenames?.length > 0 || claim.source_url || claim.status === "DERIVED") && (
+                              <div className="flex items-start text-[11px] text-[var(--evidence)] gap-1.5 pt-1">
+                                <FileCheck className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                                <div className="font-[family-name:var(--font-mono)] space-y-0.5 min-w-0">
+                                  {claim.source_filenames?.map((name) => (
+                                    <div key={name} className="truncate">
+                                      {name}
+                                      {claim.source_span && claim.source_filenames.length === 1
+                                        ? ` (chars ${claim.source_span[0]}-${claim.source_span[1]})`
+                                        : ""}
+                                    </div>
+                                  ))}
+                                  {claim.source_url && (
+                                    <a href={claim.source_url} target="_blank" rel="noreferrer" className="block truncate underline">
+                                      {claim.source_url}
+                                    </a>
+                                  )}
+                                  {!claim.source_filenames?.length && !claim.source_url && <div>Clinical graph fact</div>}
+                                </div>
                               </div>
                             )}
                           </div>
