@@ -7,6 +7,8 @@ middleware. No request-handling logic belongs here — this file only
 assembles the app.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -22,13 +24,23 @@ from app.api import (
 )
 from app.config import get_settings
 from app.security import AuditMiddleware
+from app.services.ml_singletons import preload_ml_modules
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Import ml/'s heavy modules before serving (see preload_ml_modules)."""
+    preload_ml_modules()
+    yield
+
 
 app = FastAPI(
     title="PHIRE Backend",
     description="Privacy-preserving, evidence-attributed healthcare AI — local-only API.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

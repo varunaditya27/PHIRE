@@ -14,7 +14,9 @@ below reflect actual build status, not a schedule or a time budget.
 
 ### Infrastructure Bootstrap
 - [x] Ollama + medgemma:4b (chat) → localhost:11434
-- [x] datalab-to/lift (9.7B VLM schema-guided extraction, 4-bit NF4 & CPU fallback)
+- [x] datalab-to/lift (9.7B VLM schema-guided extraction, 4-bit NF4 applied in `LiftExtractor` & CPU fallback) — real-model run verified 2026-10-04
+- [x] LIFT/CHAT GPU residency modes so lift and the chat models share an 8GB GPU (`backend/app/services/gpu_modes.py`)
+- [x] SSE progress for document ingestion and chat (`GET /api/documents/{id}/events`, `POST /api/chat/stream`)
 - [x] PostgreSQL (Docker) — Chroma is the vector store, not pgvector
 - [x] Chroma vector DB (native Python, in-process)
 - [x] Neo4j (Docker/podman) — Longitudinal Health Graph

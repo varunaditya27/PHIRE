@@ -34,10 +34,11 @@
 
 ### Running the Stack (Docker)
 ```bash
-cp .env.example .env
-bash scripts/setup.sh
-docker compose -f docker/docker-compose.yml up -d
+bash scripts/run.sh        # creates .env files if missing, builds, starts, waits for health
+# first time only -- seed the public reference corpus (needs network):
+docker compose --env-file .env -f docker/docker-compose.yml --profile ingest run --rm ingest
 curl -X POST http://localhost:8000/api/health
+# NOTE: always pass --env-file .env to docker compose (it reads docker/.env otherwise). Details: docs/BACKEND_HANDOFF.md section 8.
 ```
 
 ### Running Locally (Development Mode)
@@ -57,27 +58,31 @@ bash scripts/run_frontend.sh
 - [x] Download embedding model (medical-specialized) — MedCPT
 - [x] Setup Chroma vector DB (in-process)
 - [x] Ingest clinical reference documents (MedlinePlus, PubMed, USDA)
-- [x] Design LLM prompt for claim extraction (`medgemma:4b` / `qwen3.5:9b`)
+- [x] Design LLM prompt for claim extraction (`medgemma:4b`)
 - [x] Design claim verification approach — NLI-based (`facebook/bart-large-mnli`)
 - [x] Real RAG chain implemented (`ml/chains/qa_chain.py`)
 - [x] Longitudinal Health Graph implemented in Neo4j (`ml/graph/`)
 - [x] Unified visual document extraction via `datalab-to/lift` VLM with Option A RAG chunk synthesis
-- [x] 200 unit tests passing (`ml/tests/`)
+- [x] 220 unit tests passing (`ml/tests/`; run with `NEO4J_URI`/`NEO4J_PASSWORD` pointing at PHIRE's Neo4j)
+- [x] Lift 4-bit NF4 quantization actually applied (`LiftExtractor._get_model`) and verified live on 8GB
+- [x] Verifier fix: a clear entailing chunk beats contradictions from unrelated chunks
+- [x] `QAChain.answer(on_progress=...)` stage callback
 
 ### Anika - Backend Infrastructure
 - [x] Ollama + `medgemma:4b` running locally
-- [x] `datalab-to/lift` VLM integrated via `ml_singletons` under `GPU_LOCK`
+- [x] `datalab-to/lift` VLM integrated via `ml_singletons`, run inside `gpu_mode(LIFT)`
 - [x] PostgreSQL database setup with SQLAlchemy & Alembic migrations
 - [x] FastAPI application with 8 routers & Pydantic models
 - [x] HIPAA audit logging (dual PostgreSQL & append-only disk log)
-- [x] GPU serialization lock (`GPU_LOCK`)
+- [x] GPU serialization + residency: `GPU_LOCK` wrapped by `gpu_mode(LIFT|CHAT)` (`app/services/gpu_modes.py`)
+- [x] SSE progress endpoints (`POST /api/chat/stream`, `GET /api/documents/{id}/events`, `app/services/progress.py`)
 - [x] Docker orchestration (`docker/docker-compose.yml`)
 
 ### Shashwati - Frontend & Evaluation
 - [x] Next.js 16 project setup (App Router, React 19, TypeScript)
 - [x] Patient Overview Dashboard with Recharts timeline (`frontend/app/page.tsx`)
 - [x] Evidence-attributed medical chat interface (`frontend/app/chat/page.tsx`)
-- [x] Document upload & polling ingestion UI (`frontend/app/documents/page.tsx`)
+- [x] Document upload with live SSE ingestion progress (`frontend/app/documents/page.tsx`, `components/progress-steps.tsx`, `lib/sse.ts`)
 - [x] Hybrid evidence search & claim verifier UI (`frontend/app/search/page.tsx`)
 - [ ] Evaluation benchmark execution (ArchEHR-QA 2026 & MedHallBench)
 

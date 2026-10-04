@@ -60,11 +60,10 @@ def test_mock_extraction(monkeypatch, tmp_path):
 def test_mock_extraction_truthy_flags(monkeypatch, tmp_path):
     dummy_file = tmp_path / "doc.pdf"
     dummy_file.write_bytes(b"dummy")
-    extractor = LiftExtractor()
 
     for flag in ("1", "yes", "True", "TRUE"):
         monkeypatch.setenv("PHIRE_MOCK_LIFT", flag)
-        res = extractor.extract(dummy_file)
+        res = LiftExtractor().extract(dummy_file)
         assert len(res["observations"]) > 0
 
 
@@ -106,93 +105,79 @@ def test_nonexistent_file_raises_file_not_found_even_in_mock_mode(monkeypatch, t
         extractor.extract(missing_file)
 
 
+def _fake_lift():
+    """Stub lift.model / lift.settings so _get_model never loads real weights."""
+    manager_cls = MagicMock()
+    lift_mod = types.ModuleType("lift")
+    lift_model_mod = types.ModuleType("lift.model")
+    lift_model_mod.InferenceManager = manager_cls
+    lift_settings_mod = types.ModuleType("lift.settings")
+    lift_settings_mod.settings = types.SimpleNamespace(MODEL_CHECKPOINT=None, TORCH_DEVICE=None)
+    modules = {"lift": lift_mod, "lift.model": lift_model_mod, "lift.settings": lift_settings_mod}
+    return manager_cls, lift_settings_mod.settings, modules
+
+
 def test_get_model_raises_import_error_when_lift_not_installed():
     extractor = LiftExtractor()
-    # lift is not installed in the environment
-    if "lift" in sys.modules:
-        del sys.modules["lift"]
-    with pytest.raises(ImportError, match="lift-pdf package not installed"):
-        extractor._get_model()
+    with patch.dict(sys.modules, {"lift": None, "lift.model": None}):
+        with pytest.raises(ImportError, match="lift-pdf package not installed"):
+            extractor._get_model()
 
 
-def test_get_model_cuda_vs_cpu_branches():
-    extractor = LiftExtractor(model_id="datalab-to/lift")
-    mock_inference_manager = MagicMock()
-    lift_mod = types.ModuleType("lift")
-    lift_model_mod = types.ModuleType("lift.model")
-    lift_model_mod.InferenceManager = mock_inference_manager
-    lift_mod.model = lift_model_mod
+def test_get_model_cuda_loads_4bit_nf4_and_injects_into_manager():
+    extractor = LiftExtractor(model_id="datalab-to/lift", device="auto")
+    manager_cls, lift_settings, modules = _fake_lift()
 
-    with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
-        # When CUDA is not available: CPU mode without BitsAndBytesConfig
-        with patch.object(torch.cuda, "is_available", return_value=False):
-            extractor._model = None
-            m = extractor._get_model()
-            assert m is mock_inference_manager.return_value
-            mock_inference_manager.assert_called_with(
-                method="hf",
-                model_name="datalab-to/lift",
-                device="cpu",
-                torch_dtype=torch.float32,
-            )
+    with patch.dict(sys.modules, modules), patch.object(torch.cuda, "is_available", return_value=True):
+        with patch("transformers.AutoModelForImageTextToText.from_pretrained") as load, patch(
+            "transformers.AutoProcessor.from_pretrained"
+        ):
+            manager = extractor._get_model()
 
-        # When CUDA is available: 4-bit NF4 BitsAndBytesConfig
-        mock_inference_manager.reset_mock()
-        extractor._model = None
-        with patch.object(torch.cuda, "is_available", return_value=True):
-            m2 = extractor._get_model()
-            assert m2 is mock_inference_manager.return_value
-            assert mock_inference_manager.call_count == 1
-            call_kwargs = mock_inference_manager.call_args[1]
-            assert call_kwargs["method"] == "hf"
-            assert call_kwargs["model_name"] == "datalab-to/lift"
-            bnb_cfg = call_kwargs["quantization_config"]
-            assert bnb_cfg.load_in_4bit is True
-            assert bnb_cfg.bnb_4bit_quant_type == "nf4"
-            assert bnb_cfg.bnb_4bit_compute_dtype == torch.float16
+    kwargs = load.call_args.kwargs
+    cfg = kwargs["quantization_config"]
+    assert cfg.load_in_4bit is True
+    assert cfg.bnb_4bit_quant_type == "nf4"
+    assert cfg.bnb_4bit_compute_dtype == torch.bfloat16
+    assert cfg.llm_int8_skip_modules == ["visual"]
+    assert kwargs["device_map"] == {"": 0}
+    # The quantized model is injected; lift's own bf16 loader never runs.
+    manager_cls.assert_called_once_with(method="vllm")
+    assert manager is manager_cls.return_value
+    assert manager.method == "hf"
+    assert manager.model is load.return_value.eval.return_value
+    assert lift_settings.MODEL_CHECKPOINT == "datalab-to/lift"
 
 
-def test_lift_device_cpu_forces_cpu_mode_even_when_cuda_available(monkeypatch):
-    monkeypatch.setenv("LIFT_DEVICE", "cpu")
-    extractor = LiftExtractor(model_id="datalab-to/lift")
-    mock_inference_manager = MagicMock()
-    lift_mod = types.ModuleType("lift")
-    lift_model_mod = types.ModuleType("lift.model")
-    lift_model_mod.InferenceManager = mock_inference_manager
-    lift_mod.model = lift_model_mod
+def test_get_model_cuda_failure_does_not_fall_back_to_unquantized():
+    extractor = LiftExtractor(device="cuda")
+    manager_cls, _, modules = _fake_lift()
 
-    with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
-        with patch.object(torch.cuda, "is_available", return_value=True):
-            m = extractor._get_model()
-            assert m is mock_inference_manager.return_value
-            mock_inference_manager.assert_called_once_with(
-                method="hf",
-                model_name="datalab-to/lift",
-                device="cpu",
-                torch_dtype=torch.float32,
-            )
-            assert "quantization_config" not in mock_inference_manager.call_args.kwargs
+    with patch.dict(sys.modules, modules), patch.object(torch.cuda, "is_available", return_value=True):
+        with patch(
+            "transformers.AutoModelForImageTextToText.from_pretrained",
+            side_effect=RuntimeError("bnb load failed"),
+        ):
+            with pytest.raises(RuntimeError, match="bnb load failed"):
+                extractor._get_model()
+    manager_cls.assert_not_called()
 
 
-def test_lift_extractor_explicit_device_cpu_forces_cpu_mode():
-    extractor = LiftExtractor(model_id="datalab-to/lift", device="cpu")
-    mock_inference_manager = MagicMock()
-    lift_mod = types.ModuleType("lift")
-    lift_model_mod = types.ModuleType("lift.model")
-    lift_model_mod.InferenceManager = mock_inference_manager
-    lift_mod.model = lift_model_mod
+@pytest.mark.parametrize("device,cuda_available", [("auto", False), ("cpu", True)])
+def test_get_model_cpu_uses_lift_default_loader_without_quantization(device, cuda_available):
+    extractor = LiftExtractor(device=device)
+    manager_cls, lift_settings, modules = _fake_lift()
 
-    with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
-        with patch.object(torch.cuda, "is_available", return_value=True):
-            m = extractor._get_model()
-            assert m is mock_inference_manager.return_value
-            mock_inference_manager.assert_called_once_with(
-                method="hf",
-                model_name="datalab-to/lift",
-                device="cpu",
-                torch_dtype=torch.float32,
-            )
-            assert "quantization_config" not in mock_inference_manager.call_args.kwargs
+    with patch.dict(sys.modules, modules), patch.object(
+        torch.cuda, "is_available", return_value=cuda_available
+    ):
+        with patch("transformers.AutoModelForImageTextToText.from_pretrained") as load:
+            manager = extractor._get_model()
+
+    load.assert_not_called()
+    manager_cls.assert_called_once_with(method="hf")
+    assert manager is manager_cls.return_value
+    assert lift_settings.TORCH_DEVICE == "cpu"
 
 
 def test_real_extract_call_flow(tmp_path, monkeypatch):
@@ -217,6 +202,7 @@ def test_real_extract_call_flow(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
         extractor = LiftExtractor()
+        model_stub = extractor._model = mock_inference_manager.return_value  # skip real model loading
         with patch.object(torch.cuda, "is_available", return_value=True), \
              patch.object(torch.cuda, "empty_cache") as mock_empty_cache:
             res = extractor.extract(dummy_file)
@@ -225,7 +211,7 @@ def test_real_extract_call_flow(tmp_path, monkeypatch):
             mock_extract_fn.assert_called_once_with(
                 str(dummy_file),
                 CLINICAL_DOCUMENT_SCHEMA,
-                model=extractor._model,
+                model=model_stub,
             )
             mock_empty_cache.assert_called_once()
 
@@ -258,6 +244,7 @@ def test_real_extract_result_object_with_extraction_attr(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
         extractor = LiftExtractor()
+        model_stub = extractor._model = mock_inference_manager.return_value  # skip real model loading
         with patch.object(torch.cuda, "is_available", return_value=False):
             res = extractor.extract(dummy_file)
             assert res["document_type"] == "Image Report"
@@ -265,7 +252,7 @@ def test_real_extract_result_object_with_extraction_attr(tmp_path, monkeypatch):
             mock_extract_fn.assert_called_once_with(
                 str(dummy_file),
                 CLINICAL_DOCUMENT_SCHEMA,
-                model=extractor._model,
+                model=model_stub,
             )
 
 
@@ -284,6 +271,7 @@ def test_real_extract_raises_runtime_error_on_failure(tmp_path, monkeypatch):
 
     with patch.dict(sys.modules, {"lift": lift_mod, "lift.model": lift_model_mod}):
         extractor = LiftExtractor()
+        model_stub = extractor._model = mock_inference_manager.return_value  # skip real model loading
         with patch.object(torch.cuda, "is_available", return_value=True), \
              patch.object(torch.cuda, "empty_cache") as mock_empty_cache:
             with pytest.raises(RuntimeError, match="Lift extraction failed"):
@@ -291,7 +279,7 @@ def test_real_extract_raises_runtime_error_on_failure(tmp_path, monkeypatch):
             mock_extract_fn.assert_called_once_with(
                 str(dummy_file),
                 CLINICAL_DOCUMENT_SCHEMA,
-                model=extractor._model,
+                model=model_stub,
             )
             mock_empty_cache.assert_called_once()
 

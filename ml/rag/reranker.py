@@ -78,8 +78,9 @@ class Reranker:
         recency_weight: float = RECENCY_WEIGHT, enable_patient_floor: bool = True,
     ) -> None:
         self.model_name = model_name or os.environ.get("RERANKER_MODEL", DEFAULT_CROSS_ENCODER_MODEL)
+        self._device = _DEVICE
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(_DEVICE).eval()
+        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(self._device).eval()
         # Instance weights, not just the module constants directly -- lets
         # ml/rag/reranker_experiments/ compare configurations without
         # touching global state (see that experiment's RESULTS.md for why
@@ -111,6 +112,10 @@ class Reranker:
             return ranked[:top_k]
         return ranked
 
+    def score(self, query: str, chunks: list[Chunk]) -> list[float]:
+        """Cross-encoder relevance in [0, 1] per chunk, in input order (no authority/recency mixing)."""
+        return self._relevance_scores(query, chunks) if chunks else []
+
     def _apply_patient_floor(self, ranked: list[Chunk], relevance_by_id: dict[str, float], top_k: int) -> list[Chunk]:
         """Promote the best-matching patient-document chunk into top_k if ties otherwise excluded it.
 
@@ -141,13 +146,18 @@ class Reranker:
         promoted.insert(top_k - 1, best_patient)
         return promoted
 
+    def move_to(self, device: str) -> None:
+        """Move weights to `device` -- lets the backend park this model in CPU RAM while lift owns the GPU."""
+        self._device = device
+        self._model.to(device)
+
     def _relevance_scores(self, query: str, chunks: list[Chunk]) -> list[float]:
         """Cross-encoder relevance for each chunk, squashed to [0, 1] via sigmoid."""
         pairs = [[query, chunk.text] for chunk in chunks]
         with torch.no_grad():
             encoded = self._tokenizer(
                 pairs, truncation=True, padding=True, return_tensors="pt", max_length=512
-            ).to(_DEVICE)
+            ).to(self._device)
             logits = self._model(**encoded).logits.squeeze(dim=1)
             return torch.sigmoid(logits).cpu().tolist()
 

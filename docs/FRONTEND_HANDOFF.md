@@ -17,7 +17,7 @@ bash scripts/run_backend.sh
 # Terminal 2: Frontend
 cd frontend
 npm install
-npm run dev   # Runs on http://localhost:3000
+npm run dev   # Runs on http://localhost:3000 (use `npx next dev -p 3001` if 3000 is taken; add that origin to the backend's CORS_ORIGINS)
 ```
 
 ### Environment Configuration
@@ -31,9 +31,9 @@ npm run dev   # Runs on http://localhost:3000
 
 | Route | File Path | Description & Features |
 |---|---|---|
-| **`/` (Dashboard)** | [`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx) | **Patient Overview & Health Timeline**: Fetches `GET /api/timeline` and `GET /api/observations`. Renders multi-series Recharts line graphs for numeric lab metrics and a recent observations feed. |
-| **`/chat` (Medical Chat)** | [`frontend/app/chat/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/chat/page.tsx) | **Evidence-Attributed Assistant**: Multi-turn chat interface calling `POST /api/chat`. Features expandable per-claim audit trails with NLI status badges (`SUPPORTED`, `DERIVED`, `CONFLICTING`, `UNSUPPORTED`), confidence percentages, and source file citations. |
-| **`/documents` (Ingestion)** | [`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx) | **Document Uploader**: Drag-and-drop file uploader (PDF, PNG, JPEG) up to 25MB calling `POST /api/documents/upload`. Live polling against `GET /api/documents/{id}` for `processing`, `processed`, or `failed` status. |
+| **`/` (Dashboard)** | [`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx) | **Patient Overview & Health Timeline**: Fetches `GET /api/timeline` and `GET /api/observations`. Renders one Recharts chart **per unit** (`components/timeline-chart.tsx`: mg/dL, mmHg, %, … so unlike scales never share an axis; 8-colour palette legible in light and dark; series with no numeric readings skipped; blood pressure charted as Systolic and Diastolic) and a **Latest Readings** feed (latest per metric, newest first; conditions/medications show their status; units are not repeated — `lib/readings.ts`). |
+| **`/chat` (Medical Chat)** | [`frontend/app/chat/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/chat/page.tsx) | **Evidence-Attributed Assistant**: Multi-turn chat interface calling `POST /api/chat/stream` (SSE): while the backend works, a live step checklist (`components/progress-steps.tsx`) shows each stage with a per-step elapsed timer, replacing the old static spinner. Features expandable per-claim audit trails with NLI status badges (`SUPPORTED`, `DERIVED`, `CONFLICTING`, `UNSUPPORTED`), confidence percentages, and source file citations. |
+| **`/documents` (Ingestion)** | [`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx) | **Document Uploader**: Drag-and-drop file uploader (PDF, PNG, JPEG) up to 25MB calling `POST /api/documents/upload`. Live ingestion progress over SSE from `GET /api/documents/{id}/events` (stage checklist on each card: queued → loading vision model → reading document → indexing → saving to timeline → done/failed); the old 2.5s polling is gone. On stream end the page re-reads the final row via `GET /api/documents/{id}`. |
 | **`/search` (Explorer)** | [`frontend/app/search/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/search/page.tsx) | **Evidence & Claim Explorer**: Tab 1 executes hybrid search via `GET /api/search/evidence`. Tab 2 allows direct NLI claim verification via `POST /api/evidence/verify`. |
 
 ---
@@ -55,32 +55,42 @@ Defined in [`frontend/app/globals.css`](file:///home/varun/Projects/PHIRE/fronte
 
 ---
 
+**Cross-cutting UI (added `[0.8.1]`):** below the `md` breakpoint the sidebar becomes a compact top bar (`MobileNav` in `components/sidebar.tsx`) and page padding shrinks, so the app is usable at 390px; a wellness/not-a-medical-device disclaimer is shown in the sidebar and under the chat input; the documents card badge follows the live SSE stream (it used to read "Uploaded" for the whole run); search and verifier results link to their public source URL.
+
+---
+
 ## 4. API Client & Data Models (`frontend/lib/api.ts`)
 
 The frontend communicates with the backend exclusively via typed wrappers in [`frontend/lib/api.ts`](file:///home/varun/Projects/PHIRE/frontend/lib/api.ts):
 - `api.health.check()`: Calls `POST /api/health`
 - `api.health.ping()`: Calls `GET /api/ping`
-- `api.chat.send(message)`: Calls `POST /api/chat`
+- `api.chat.send(message)`: Calls `POST /api/chat` (non-streaming; still available)
 - `api.documents.upload(file)`: Streams `multipart/form-data` to `POST /api/documents/upload`
-- `api.documents.get(id)`: Polls `GET /api/documents/{id}`
+- `api.documents.remove(id)`: Calls `DELETE /api/documents/{id}` (documents page trash button, confirm dialog; throws the server's `detail` on 409/404)
+- `api.documents.list()`: Calls `GET /api/documents` (documents page loads from the backend)
+- `api.chat.history()`: Calls `GET /api/chat/messages` (chat page rehydrates on mount)
+- `api.documents.get(id)`: Calls `GET /api/documents/{id}` (final status after a stream ends)
+- `api.documents.watch(id, onProgress, signal?)`: SSE stream from `GET /api/documents/{id}/events`; resolves when the server closes it
+- `api.chat.stream(message, onProgress)`: SSE from `POST /api/chat/stream`; calls `onProgress` per stage and resolves with the final `ChatResponse` (rejects on an `error` event)
 - `api.observations.list(params)`: Calls `GET /api/observations`
 - `api.timeline.get()`: Calls `GET /api/timeline`
 - `api.evidence.search(query, top_k)`: Calls `GET /api/search/evidence`
 - `api.evidence.verify(claim)`: Calls `POST /api/evidence/verify`
 - `api.claims.extract(text)`: Calls `POST /api/claims/extract`
 
+SSE is read with `frontend/lib/sse.ts`'s `readSSE()` (fetch + stream reader, so it works for POST; `EventSource` is GET-only). `ProgressEvent` (`{stage, message}`) is exported from `api.ts`.
+
 ---
 
 ## 5. Active Frontend Work Items & Gaps
 
-1. **Fix `EvidenceCitation.score` in Search**:
+1. ~~**Fix `EvidenceCitation.score` in Search**~~ — **done in `[0.7.1]` (backend).** Original note:
    Backend `chunk_to_citation()` leaves `score` as `None`, causing `frontend/app/search/page.tsx` to display `0.0%`. Pass score through in backend service.
-2. **Remove `localStorage` Workaround for Documents**:
+2. ~~**Remove `localStorage` Workaround for Documents**~~ — **done in `[0.7.2]`** (page uses `GET /api/documents`). Original note:
    Currently, `frontend/app/documents/page.tsx` caches document IDs in browser `localStorage`. Once backend exposes `GET /api/documents`, switch to fetching the full document list directly on component mount.
-3. **Add Chat History Rehydration**:
+3. ~~**Add Chat History Rehydration**~~ — **done in `[0.7.2]`** (`api.chat.history()` on mount). Original note:
    Implement a chat message list fetch on mount in `frontend/app/chat/page.tsx` once backend exposes `GET /api/chat/messages`.
-4. **Remove Redundant Ingestion Call**:
-   Remove `api.documents.process(res.id)` in `frontend/app/documents/page.tsx:L98` since backend `/upload` already enqueues background processing automatically.
+4. ~~**Remove Redundant Ingestion Call**~~ — **done 2026-10-04.** The documents page no longer calls `api.documents.process` after upload (it would also have reset the SSE progress history mid-run); it just watches the stream.
 5. **Type Alignment**:
    Update `Claim.source_span` to `[number, number] | null` and `ObservationRead.value` to `string | null` in `frontend/lib/api.ts`.
 6. **Observation Status Badges**:

@@ -20,6 +20,7 @@ from html.parser import HTMLParser
 import re
 
 from ml.graph.client import GraphClient
+from ml.graph.composite_readings import expand
 from ml.graph.document_dates import find_document_date
 from ml.graph.metric_resolver import resolve_metric
 
@@ -225,7 +226,29 @@ def build_lift_observations(
             "interpretation": obs.get("interpretation") or None,
             "effective": effective_date,
         })
+        expansion = expand(code, val_str, unit)
+        if expansion:
+            if expansion.primary:
+                result[-1]["value"], result[-1]["unit"] = expansion.primary
+            result.extend(
+                _derived_observation(name, number, derived_unit, document_id, effective_date)
+                for name, number, derived_unit in expansion.extras
+            )
     return result
+
+
+def _derived_observation(code: str, value: float, unit: str, document_id: str, effective_date: str | None) -> dict:
+    """A numeric observation derived from one part of a composite reading (see composite_readings.py)."""
+    return {
+        "id": _stable_id(document_id, code),
+        "code": code,
+        "raw_value": f"{value:g} {unit}",
+        "value": value,
+        "unit": unit,
+        "reference_range": None,
+        "interpretation": None,
+        "effective": effective_date,
+    }
 
 
 def write_observations(

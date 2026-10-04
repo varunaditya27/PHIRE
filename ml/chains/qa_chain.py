@@ -16,13 +16,18 @@ the cost of prose that reads as a list of statements rather than a
 flowing answer. Revisit once this is validated end-to-end.
 """
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from ml.claims.confidence import compute_confidence
 from ml.claims.extractor import ClaimExtractor
 from ml.claims.verifier import ClaimVerifier
 from ml.graph.client import GraphClient
-from ml.graph.patient_context import get_current_patient_facts, get_patient_facts, get_trend_facts
+from ml.graph.patient_context import (
+    get_current_patient_facts_with_sources,
+    get_patient_facts,
+    get_trend_facts_with_sources,
+)
 from ml.llm.ollama_client import OllamaClient
 from ml.llm.prompt_builder import build_chat_prompt
 from ml.rag.reranker import Reranker
@@ -69,6 +74,9 @@ class VerifiedClaim:
     source_url: str | None
     source_filename: str | None
     source_span: tuple[int, int] | None
+    # Every uploaded document the claim rests on: a trend spans the two readings'
+    # documents, so one filename is not enough. source_filename is the first of these.
+    source_filenames: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -77,6 +85,14 @@ class ChatResponse:
 
     answer: str
     claims: list[VerifiedClaim]
+    # The reranked passages the answer was drafted from, for the API's `citations`.
+    evidence: list[Chunk] = field(default_factory=list)
+
+
+def _as_sentence(claim: str) -> str:
+    """Claim text with terminal punctuation, so joined claims read as sentences, not one run-on line."""
+    claim = claim.strip()
+    return claim if claim.endswith((".", "!", "?")) else f"{claim}."
 
 
 class QAChain:
@@ -98,14 +114,27 @@ class QAChain:
         self._llm = llm_client or OllamaClient()
         self._graph_client = graph_client or GraphClient()
 
-    def answer(self, question: str, observations: list[str] | None = None, top_k: int = 5) -> ChatResponse:
+    def answer(
+        self,
+        question: str,
+        observations: list[str] | None = None,
+        top_k: int = 5,
+        on_progress: Callable[[str, str], None] | None = None,
+    ) -> ChatResponse:
         """Run the full retrieve -> generate -> verify -> abstain pipeline for one question.
 
         observations defaults to the patient's current graph state
         (ml/graph/patient_context.py) -- callers only need to pass it
         explicitly to override that default (e.g. tests).
+
+        on_progress(stage, message), if given, is called as each stage
+        starts so a caller (the backend's SSE endpoint) can show what the
+        slow, otherwise-silent pipeline is doing; it never affects results.
         """
-        history_facts, current_facts, trend_facts = self._graph_facts(need_history=observations is None)
+        progress = on_progress or (lambda stage, message: None)
+        progress("graph", "Reading your health records")
+        history_facts, current_facts, trend_pairs = self._graph_facts(need_history=observations is None)
+        trend_facts = [fact for fact, _ in trend_pairs]
         if observations is None:
             observations = history_facts + trend_facts
 
@@ -118,10 +147,12 @@ class QAChain:
         # the candidate pool in the first place. Verified live: a patient
         # document's own lab value ranked outside a top_k*2=10 pool but
         # inside a wider one.
+        progress("retrieve", "Searching medical evidence")
         candidates = self._retriever.retrieve(question, top_k=max(20, top_k * 4))
         evidence = self._reranker.rerank(question, candidates, top_k=top_k)
 
         prompt = build_chat_prompt(question, evidence, observations)
+        progress("generate", "Drafting an answer with the local model")
         draft_answer = self._llm.generate(prompt)
 
         # A claim restating a patient fact ("your LDL was 162 mg/dL") needs
@@ -136,7 +167,10 @@ class QAChain:
         # a new one (also verified live). Listed first so a patient fact
         # wins ties over a topically-similar reference chunk when both
         # score similarly informative.
-        patient_evidence = self._facts_to_chunks(current_facts, source="patient_record")
+        patient_evidence = self._facts_to_chunks(
+            [fact for fact, _ in current_facts], source="patient_record",
+            filenames=[[name] if name else [] for _, name in current_facts],
+        )
         # A trend claim ("your LDL increased 29 points") is arithmetic on
         # two Observations, not something NLI can verify against a single
         # fact sentence -- get_trend_facts precomputes the delta as its
@@ -144,16 +178,25 @@ class QAChain:
         # can relabel a match here as DERIVED rather than SUPPORTED (see
         # ml/claims/verifier.py's docstring for why DERIVED can't be
         # implemented as an NLI-only distinction).
-        derived_evidence = self._facts_to_chunks(trend_facts, source="patient_derived")
+        derived_evidence = self._facts_to_chunks(
+            trend_facts, source="patient_derived", filenames=[names for _, names in trend_pairs],
+        )
         verification_pool = patient_evidence + derived_evidence + evidence
 
-        verified = [self._verify_claim(claim, verification_pool) for claim in self._extractor.extract(draft_answer)]
+        progress("extract", "Splitting the draft into checkable claims")
+        claims = self._extractor.extract(draft_answer)
+        verified = []
+        for i, claim in enumerate(claims, start=1):
+            progress("verify", f"Verifying claim {i} of {len(claims)} against your records and evidence")
+            verified.append(self._verify_claim(claim, verification_pool))
         supported = [c for c in verified if c.status in ("SUPPORTED", "DERIVED") and c.confidence >= ABSTENTION_THRESHOLD]
-        answer = " ".join(c.claim for c in supported) if supported else NO_EVIDENCE_MESSAGE
-        return ChatResponse(answer=answer, claims=verified)
+        answer = " ".join(_as_sentence(c.claim) for c in supported) if supported else NO_EVIDENCE_MESSAGE
+        return ChatResponse(answer=answer, claims=verified, evidence=evidence)
 
-    def _graph_facts(self, need_history: bool) -> tuple[list[str], list[str], list[str]]:
-        """(history facts, current facts, trend facts) from the graph, or three empty
+    def _graph_facts(
+        self, need_history: bool,
+    ) -> tuple[list[str], list[tuple[str, str | None]], list[tuple[str, list[str]]]]:
+        """(history facts, (current fact, source filename) pairs, (trend fact, source filenames) pairs) from the graph, or three empty
         lists if Neo4j is unreachable.
 
         The graph layer is documented (CLAUDE.md) as "not MVP-blocking" --
@@ -162,7 +205,7 @@ class QAChain:
         lose the patient-specific/trend grounding for that turn. Fetched
         together in one try/except (not one per call site) so a partial
         graph outage can't leave observations/current_facts/trend_facts
-        in an inconsistent mix of real and empty. get_trend_facts is only
+        in an inconsistent mix of real and empty. The trend query is only
         computed once, reused for both the prompt-context `observations`
         and the trend-claim verification pool below, instead of querying
         the graph for the identical result twice.
@@ -171,15 +214,15 @@ class QAChain:
         try:
             if need_history:
                 history_facts = get_patient_facts(self._graph_client)
-            current_facts = get_current_patient_facts(self._graph_client)
-            trend_facts = get_trend_facts(self._graph_client)
+            current_facts = get_current_patient_facts_with_sources(self._graph_client)
+            trend_facts = get_trend_facts_with_sources(self._graph_client)
         except Exception as exc:  # noqa: BLE001 -- degrade, not crash; see docstring
             print(f"QAChain: graph unavailable, answering without patient-graph facts: {exc}")
             return [], [], []
         return history_facts, current_facts, trend_facts
 
     @staticmethod
-    def _facts_to_chunks(facts: list[str], source: str) -> list[Chunk]:
+    def _facts_to_chunks(facts: list[str], source: str, filenames: list[list[str]] | None = None) -> list[Chunk]:
         """Wrap plain-text graph facts as Chunks so the verifier can check claims against them.
 
         authority=1.0 matches PATIENT_DOCUMENT_AUTHORITY (reranker.py) --
@@ -195,9 +238,14 @@ class QAChain:
         if len(facts) > MAX_FACT_EVIDENCE:
             print(f"QAChain: capping {len(facts)} {source} facts to {MAX_FACT_EVIDENCE} for claim verification")
             facts = facts[:MAX_FACT_EVIDENCE]
+        filenames = filenames or [[] for _ in facts]
         return [
-            Chunk(id=f"{source}_{i}", text=fact, metadata={"source": source, "authority": 1.0})
-            for i, fact in enumerate(facts)
+            Chunk(
+                id=f"{source}_{i}", text=fact,
+                # filenames lets a verified claim cite every uploaded document the fact came from.
+                metadata={"source": source, "authority": 1.0, **({"filenames": names} if names else {})},
+            )
+            for i, (fact, names) in enumerate(zip(facts, filenames))
         ]
 
     def _verify_claim(self, claim: str, evidence: list[Chunk]) -> VerifiedClaim:
@@ -230,7 +278,10 @@ class QAChain:
         source_span = None
         if "char_start" in metadata and "char_end" in metadata:
             source_span = (metadata["char_start"], metadata["char_end"])
+        # Graph facts carry a list of source files; Chroma passages carry a single filename.
+        filenames = metadata.get("filenames") or ([metadata["filename"]] if metadata.get("filename") else [])
         return VerifiedClaim(
             claim=claim, status=status, confidence=confidence,
-            source_url=metadata.get("url"), source_filename=metadata.get("filename"), source_span=source_span,
+            source_url=metadata.get("url"), source_filename=filenames[0] if filenames else None,
+            source_span=source_span, source_filenames=filenames,
         )

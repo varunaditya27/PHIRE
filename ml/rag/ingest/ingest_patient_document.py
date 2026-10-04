@@ -49,8 +49,13 @@ def build_chunks(
     text: str | None = None,
     document_id: str | None = None,
     data: dict[str, Any] | None = None,
+    filename: str | None = None,
 ) -> list[Chunk]:
-    """Extract, synthesize, and wrap one patient document as retriever.Chunk objects via Lift."""
+    """Extract, synthesize, and wrap one patient document as retriever.Chunk objects via Lift.
+
+    `filename` overrides the on-disk name shown as the chunk's source -- the
+    backend stores uploads as `<uuid>.<ext>`, which is meaningless to a user.
+    """
     if document_id is None:
         document_id = hashlib.sha256(file_path.read_bytes()).hexdigest()[:16]
 
@@ -76,7 +81,7 @@ def build_chunks(
     chunks = synthesize_patient_chunks(
         payload=data,
         document_id=document_id,
-        filename=file_path.name,
+        filename=filename or file_path.name,
         authority=PATIENT_DOCUMENT_AUTHORITY,
     )
     if not chunks:

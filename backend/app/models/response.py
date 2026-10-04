@@ -40,6 +40,18 @@ class ChatResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class ChatMessageRead(BaseModel):
+    """One persisted chat turn, for rehydrating the chat UI after a reload."""
+
+    id: UUID
+    role: str
+    content: str
+    claims: list[Claim] | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class EvidenceRetrieveRequest(BaseModel):
     query: str
     top_k: int = 5

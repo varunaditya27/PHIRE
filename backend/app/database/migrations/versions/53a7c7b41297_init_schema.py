@@ -11,7 +11,7 @@ schema, then a second migration dropping patient_id and the
 observations/evidence_passages tables) into one, since neither migration
 had ever been applied to any real/shared database -- a fresh install
 creating tables it immediately alters is pure churn, not real migration
-history. Schema verified live against a real Postgres 16 + pgvector
+history. Schema verified live against a real Postgres 16
 instance (see docs/BACKEND_HANDOFF.md's testing section).
 """
 from typing import Sequence, Union

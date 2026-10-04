@@ -1,0 +1,41 @@
+# Optional reverse proxy in front of frontend (:3000) and backend (:8000), so the whole app is
+# reachable under one origin (e.g. on a trusted LAN). Opt-in:
+#   docker compose --env-file .env -f docker/docker-compose.yml --profile proxy up -d
+# PHIRE has no authentication -- only enable this on a network you trust, and set BACKEND_HOST=0.0.0.0
+# if other machines must reach it. For same-origin API calls build the frontend with
+# NEXT_PUBLIC_API_URL= (empty) so the browser talks to this proxy instead of :8000.
+#
+# This is a template: the official nginx image runs envsubst over /etc/nginx/templates/*.template at
+# start, filling in BACKEND_PORT, FRONTEND_PORT and PROXY_PORT (compose passes them), so the proxy follows
+# whatever ports you configured. Only those variables are substituted; nginx's own $host etc. are untouched.
+#
+# Targets 127.0.0.1 (not "localhost", which tries IPv6 ::1 first and logs refused connections), not the "backend"/"frontend" service names -- this service runs with
+# network_mode: host (see docker-compose.yml), the same fix backend itself uses, because backend is
+# host-networked and does not answer on the bridge network's "backend:8000" at all.
+
+server {
+  listen ${PROXY_PORT};
+
+  # Uploads are capped at 25MB by the backend (UPLOAD_MAX_SIZE_BYTES); nginx's default is 1MB and
+  # would reject every real PDF with a 413 before it reached the backend.
+  client_max_body_size 25m;
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT};
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    # Server-Sent Events (POST /api/chat/stream, GET /api/documents/{id}/events): no buffering, HTTP/1.1,
+    # and a read timeout longer than the 15s keep-alive the stream sends while idle.
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 300s;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:${FRONTEND_PORT};
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+  }
+}

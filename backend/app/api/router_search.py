@@ -1,8 +1,9 @@
 """
 GET /api/search/evidence — evidence/document search endpoint.
 
-Thin passthrough into ml.rag.retriever.HybridRetriever (BM25 + semantic
-hybrid search, fused via reciprocal rank fusion) -- see
+Hybrid retrieval (BM25 + semantic, reciprocal rank fusion) followed by the
+same cross-encoder rerank chat uses; each result carries its relevance as
+`score` (see app/services/evidence_search.py). See
 app/api/router_evidence.py's POST /api/evidence/retrieve for the same
 underlying call exposed with a request-body contract instead of query
 params (kept as two routes per CONTRIBUTING.md's original endpoint list,
@@ -12,17 +13,11 @@ not because the logic differs).
 from fastapi import APIRouter
 
 from app.models.response import EvidenceCitation
-from app.services.citations import chunk_to_citation
-from app.services.ml_singletons import GPU_LOCK, get_retriever
+from app.services import evidence_search
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
 @router.get("/evidence", response_model=list[EvidenceCitation])
 def search_evidence(query: str, top_k: int = 5) -> list[EvidenceCitation]:
-    # GPU_LOCK: see ml_singletons.py's docstring -- get_retriever() uses
-    # the GPU-resident MedCPT embedding model, same as chat generation and
-    # document ingestion.
-    with GPU_LOCK:
-        chunks = get_retriever().retrieve(query, top_k=top_k)
-    return [chunk_to_citation(chunk) for chunk in chunks]
+    return evidence_search.search_evidence(query, top_k)

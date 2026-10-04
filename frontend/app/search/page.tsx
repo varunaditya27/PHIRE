@@ -82,7 +82,7 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-8">
+    <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8">
       <div>
         <h1 className="text-3xl font-medium tracking-tight text-foreground font-[family-name:var(--font-editorial)]">Evidence & Claim Explorer</h1>
         <p className="text-muted-foreground mt-1">
@@ -169,10 +169,15 @@ export default function SearchPage() {
                       <span className="font-semibold px-2 py-0.5 rounded bg-secondary text-secondary-foreground">
                         {cite.source_filename || "Knowledge Base"}
                       </span>
+                      {cite.source_url && (
+                        <a href={cite.source_url} target="_blank" rel="noreferrer" className="underline hover:text-foreground truncate max-w-[320px]">
+                          {cite.source_url.replace(/^https?:\/\//, "")}
+                        </a>
+                      )}
                       {cite.page_number && <span>Page {cite.page_number}</span>}
                     </div>
                     <span className="font-mono text-[var(--evidence)] font-medium">
-                      Match score: {(cite.score * 100).toFixed(1)}%
+                      Match score: {typeof cite.score === "number" ? `${(cite.score * 100).toFixed(1)}%` : "n/a"}
                     </span>
                   </div>
 
@@ -259,7 +264,15 @@ export default function SearchPage() {
                 <div className="p-3 rounded-lg bg-secondary/50 border border-border">
                   <span className="text-muted-foreground block mb-1">Evidence Source</span>
                   <span className="font-medium text-foreground truncate block">
-                    {verifiedClaim.source_filename || "Knowledge graph fact / no direct citation"}
+                    {verifiedClaim.source_filenames?.length ? (
+                      verifiedClaim.source_filenames.join(", ")
+                    ) : verifiedClaim.source_url ? (
+                      <a href={verifiedClaim.source_url} target="_blank" rel="noreferrer" className="underline">
+                        {verifiedClaim.source_url}
+                      </a>
+                    ) : (
+                      "Knowledge graph fact / no direct citation"
+                    )}
                   </span>
                 </div>
               </div>

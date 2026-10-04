@@ -73,8 +73,13 @@ cd PHIRE
 cp .env.example .env
 bash scripts/setup.sh
 
-# Start all services (PostgreSQL, Ollama, Neo4j, Backend, Frontend)
-docker compose -f docker/docker-compose.yml up -d
+# Start all services (PostgreSQL, Neo4j, Backend, Frontend). Builds, enables the GPU if an NVIDIA runtime
+# is present, uses the Ollama already running on your host (or starts a bundled one if there is none),
+# and waits until the backend is healthy. Always uses the root .env.
+bash scripts/run.sh
+
+# One-time: seed the public reference corpus (MedlinePlus/PubMed/USDA; needs network)
+docker compose --env-file .env -f docker/docker-compose.yml --profile ingest run --rm ingest
 
 # Verify system health
 curl -X POST http://localhost:8000/api/health
@@ -87,7 +92,24 @@ curl -X POST http://localhost:8000/api/health
 3. **Ask Questions**: Open `http://localhost:3000/chat` and ask "What was my most recent LDL level?".
 4. **Inspect Evidence**: Expand the Claim Verification audit trail to view exact confidence scores and source citations.
 
+Both long waits show live progress over Server-Sent Events: uploads display each ingestion stage (loading the vision model, reading the document, indexing, saving to your timeline), and chat displays each pipeline stage (reading records, searching evidence, drafting, verifying claim *i* of *n*).
+
+> If another app already uses port 3000, 7687 or 5433, run PHIRE on alternates — see [docs/BACKEND_HANDOFF.md §9.3](docs/BACKEND_HANDOFF.md).
+
 ---
+
+### Start from scratch (clear demo/test data)
+
+Before a real user ingests their own records, wipe everything left over from development:
+
+```bash
+PYTHONPATH=. ml/.venv/bin/python scripts/reset_data.py --dry-run   # show targets + counts, change nothing
+PYTHONPATH=. ml/.venv/bin/python scripts/reset_data.py             # asks you to type RESET
+```
+
+It clears, using the targets in `backend/.env`: PostgreSQL (`documents`, `chat_messages`, `claims`, `audit_log`), the whole Neo4j health graph, **patient-document chunks** in Chroma, and uploaded files + the audit log file. Flags: `--keep-audit` (keep audit rows/file), `--include-reference` (also wipe the public reference corpus), `--yes` (skip the prompt). Restart the backend afterwards.
+
+**Why the reference corpus is kept by default:** it is not user data. It is the public medical knowledge (MedlinePlus, PubMed abstracts, USDA nutrition) PHIRE retrieves from to ground general statements — without it a claim like "statins lower LDL" has nothing to be verified against and comes back unsupported, so answers could only restate the user's own records. It was ingested once with `ml/rag/ingest/run_ingest.py` (needs network); wiping it means re-running that.
 
 ## 📊 Features & Status
 
@@ -97,7 +119,9 @@ curl -X POST http://localhost:8000/api/health
 - [x] Evidence attribution (claim-level, with exact source citations)
 - [x] Claim verification / hallucination detection (BART-large-MNLI, abstains below confidence threshold)
 - [x] Longitudinal reasoning (Neo4j-backed patient fact graph: current state + trend deltas)
-- [x] Document ingestion (unified single-pass visual extraction via `datalab-to/lift` 9.7B VLM with 4-bit NF4 on CUDA and CPU fallback)
+- [x] SSE live progress for document ingestion and chat (`GET /api/documents/{id}/events`, `POST /api/chat/stream`)
+- [x] LIFT/CHAT GPU modes so lift and the chat models share an 8GB GPU by swapping (`backend/app/services/gpu_modes.py`)
+- [x] Document ingestion (unified single-pass visual extraction via `datalab-to/lift` 9.7B VLM with 4-bit NF4 on CUDA applied in `LiftExtractor`, ~6.5GiB peak on an 8GB GPU, and CPU fallback)
 - [x] Backend API integration (FastAPI with 8 routers, HIPAA audit logging, GPU lock)
 - [x] Frontend UI (Next.js 16 App Router: Dashboard, Chat, Documents, Search)
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { api, ChatResponse, Claim } from "@/lib/api";
+import { api, ChatResponse, Claim, ProgressEvent } from "@/lib/api";
+import { ProgressSteps } from "@/components/progress-steps";
 import { Send, Bot, User, ShieldCheck, AlertTriangle, HelpCircle, CheckCircle2, ChevronDown, ChevronRight, FileCheck, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,8 +25,29 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [steps, setSteps] = useState<ProgressEvent[]>([]);
   const [expandedClaims, setExpandedClaims] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Rebuild the conversation from the backend so a reload doesn't wipe it.
+  useEffect(() => {
+    api.chat
+      .history()
+      .then((history) => {
+        if (history.length === 0) return;
+        setMessages((prev) => [
+          prev[0],
+          ...history.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            claims: m.claims ?? undefined,
+            createdAt: m.created_at,
+          })),
+        ]);
+      })
+      .catch((err) => console.error("Failed to load chat history:", err));
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -33,7 +55,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, loading]);
+  }, [messages, loading, steps]);
 
   const toggleClaimExpansion = (msgId: string) => {
     setExpandedClaims((prev) => ({
@@ -55,10 +77,11 @@ export default function ChatPage() {
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setSteps([]);
     setLoading(true);
 
     try {
-      const response: ChatResponse = await api.chat.send(userMessage.content);
+      const response: ChatResponse = await api.chat.stream(userMessage.content, (e) => setSteps((prev) => [...prev, e]));
       const assistantMessage: Message = {
         id: response.id || Date.now().toString(),
         role: "assistant",
@@ -125,7 +148,7 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
-      <div className="border-b border-border px-8 py-4 bg-card">
+      <div className="border-b border-border px-4 md:px-8 py-4 bg-card">
         <h1 className="text-xl font-medium tracking-tight text-foreground flex items-center font-[family-name:var(--font-editorial)]">
           <ShieldCheck className="w-5 h-5 mr-2 text-[var(--evidence)]" />
           Evidence-Attributed Medical Chat
@@ -136,7 +159,7 @@ export default function ChatPage() {
       </div>
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-4xl w-full mx-auto custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-6 max-w-4xl w-full mx-auto custom-scrollbar">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -206,13 +229,25 @@ export default function ChatPage() {
                               "{claim.statement}"
                             </p>
 
-                            {(claim.source_filename || claim.source_span) && (
-                              <div className="flex items-center text-[11px] text-[var(--evidence)] gap-1.5 pt-1">
-                                <FileCheck className="w-3.5 h-3.5 flex-shrink-0" />
-                                <span className="truncate font-[family-name:var(--font-mono)]">
-                                  {claim.source_filename || "Clinical graph fact"}
-                                  {claim.source_span ? ` (${claim.source_span})` : ""}
-                                </span>
+                            {(claim.source_filenames?.length > 0 || claim.source_url || claim.status === "DERIVED") && (
+                              <div className="flex items-start text-[11px] text-[var(--evidence)] gap-1.5 pt-1">
+                                <FileCheck className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                                <div className="font-[family-name:var(--font-mono)] space-y-0.5 min-w-0">
+                                  {claim.source_filenames?.map((name) => (
+                                    <div key={name} className="truncate">
+                                      {name}
+                                      {claim.source_span && claim.source_filenames.length === 1
+                                        ? ` (chars ${claim.source_span[0]}-${claim.source_span[1]})`
+                                        : ""}
+                                    </div>
+                                  ))}
+                                  {claim.source_url && (
+                                    <a href={claim.source_url} target="_blank" rel="noreferrer" className="block truncate underline">
+                                      {claim.source_url}
+                                    </a>
+                                  )}
+                                  {!claim.source_filenames?.length && !claim.source_url && <div>Clinical graph fact</div>}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -233,13 +268,19 @@ export default function ChatPage() {
         ))}
 
         {loading && (
-          <div className="flex gap-4 justify-start items-center animate-pulse">
+          <div className="flex gap-4 justify-start items-center">
             <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 text-primary">
               <Bot className="w-5 h-5" />
             </div>
-            <div className="bg-card border border-border rounded-2xl rounded-bl-none px-5 py-4 flex items-center space-x-3 text-muted-foreground text-sm">
-              <Loader2 className="w-4 h-4 animate-spin text-primary" />
-              <span>Analyzing medical records and verifying claims...</span>
+            <div className="bg-card border border-border rounded-2xl rounded-bl-none px-5 py-4 text-muted-foreground text-sm">
+              {steps.length > 0 ? (
+                <ProgressSteps steps={steps} />
+              ) : (
+                <span className="flex items-center gap-3">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  Connecting to PHIRE...
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -268,6 +309,10 @@ export default function ChatPage() {
             <Send className="w-5 h-5" />
           </button>
         </form>
+        <p className="max-w-4xl mx-auto mt-2 text-center text-[11px] text-muted-foreground">
+          PHIRE is a wellness decision-support tool, not a medical device. It does not diagnose and is not for
+          emergencies — contact a clinician or emergency services for urgent concerns.
+        </p>
       </div>
     </div>
   );

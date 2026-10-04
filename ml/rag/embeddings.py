@@ -36,15 +36,22 @@ class EmbeddingModel:
         self.article_model_name = article_model_name or os.environ.get(
             "EMBEDDING_ARTICLE_MODEL", DEFAULT_ARTICLE_MODEL
         )
+        self._device = _DEVICE
         self._query_tokenizer = AutoTokenizer.from_pretrained(self.query_model_name)
-        self._query_model = AutoModel.from_pretrained(self.query_model_name).to(_DEVICE).eval()
+        self._query_model = AutoModel.from_pretrained(self.query_model_name).to(self._device).eval()
         self._article_tokenizer = AutoTokenizer.from_pretrained(self.article_model_name)
-        self._article_model = AutoModel.from_pretrained(self.article_model_name).to(_DEVICE).eval()
+        self._article_model = AutoModel.from_pretrained(self.article_model_name).to(self._device).eval()
+
+    def move_to(self, device: str) -> None:
+        """Move weights to `device` -- lets the backend park this model in CPU RAM while lift owns the GPU."""
+        self._device = device
+        self._query_model.to(device)
+        self._article_model.to(device)
 
     def _encode(self, texts: list[str], tokenizer, model) -> list[list[float]]:
         """CLS-token pooling + L2 normalization, per the MedCPT model card."""
         with torch.no_grad():
-            inputs = tokenizer(texts, truncation=True, padding=True, return_tensors="pt", max_length=512).to(_DEVICE)
+            inputs = tokenizer(texts, truncation=True, padding=True, return_tensors="pt", max_length=512).to(self._device)
             cls_embeddings = model(**inputs).last_hidden_state[:, 0, :]
             normed = cls_embeddings / cls_embeddings.norm(dim=1, keepdim=True)
             return normed.cpu().tolist()

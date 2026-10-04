@@ -15,7 +15,7 @@ docstring). Every request to clinical endpoints is audited server-side regardles
 
 **Errors**: Standard FastAPI/Pydantic format: `{"detail": "..."}` for a
 plain error message or `{"detail": [...]}` for a 422 validation error. Status
-codes used: `404` (not found), `409` (document already processing), `413`
+codes used: `404` (not found), `409` (document already processing — only from `/process`), `413`
 (upload too large), `415` (unsupported file type), `422` (validation), `501`
 (recommendation model not implemented yet), `502` (ML pipeline execution error).
 
@@ -52,7 +52,7 @@ Fast liveness probe with zero dependency checks.
 ## 2. Chat
 
 ### `POST /api/chat`
-The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generation (`medgemma:4b`) → atomic claim extraction (`qwen3.5:9b`) → NLI verification (`facebook/bart-large-mnli`) → confidence scoring → claim filtering and abstention. Executes under `GPU_LOCK`. Single blocking call, **no streaming**.
+The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generation (`medgemma:4b`) → atomic claim extraction (the same local model, `medgemma:4b`) → NLI verification (`facebook/bart-large-mnli`) → confidence scoring → claim filtering and abstention. Runs inside `gpu_mode(CHAT)` (see [BACKEND_HANDOFF.md](BACKEND_HANDOFF.md)). Single blocking JSON call; use `POST /api/chat/stream` below when the caller wants live progress.
 
 **Request** `ChatRequest`
 ```json
@@ -72,10 +72,13 @@ The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generat
       "confidence": 0.866,
       "source_url": null,
       "source_filename": "lab_report_2026.pdf",
+      "source_filenames": ["lab_report_2026.pdf"],
       "source_span": [120, 245]
     }
   ],
-  "citations": [],
+  "citations": [
+    { "evidence_passage_id": "...", "text": "...", "source_filename": "lab_report.pdf", "source_url": null, "authority": 1.0, "score": null }
+  ],
   "created_at": "2026-09-03T12:00:00Z"
 }
 ```
@@ -87,14 +90,44 @@ The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generat
 - `claims[].source_span` is serialized as a two-element integer array `[start_char_offset, end_char_offset]` (or `null`).
 - **The answer text is pre-filtered**: only claims passing confidence thresholds are assembled into the returned `answer`.
 
-*(Note: `GET /api/chat/messages` for loading chat history on page load is tracked on the backlog).*
+### `POST /api/chat/stream` (SSE)
+The same turn as `POST /api/chat` (same request body, same persistence to `chat_messages` / `claims`), delivered as **Server-Sent Events** so a UI can show what the otherwise-silent pipeline is doing. `Content-Type: text/event-stream`. Because it is a POST, consume it with `fetch` + a stream reader (the browser `EventSource` is GET-only) — `frontend/lib/sse.ts` does this.
+
+Events, in order:
+
+| `event:` | `data:` (JSON) | Meaning |
+|---|---|---|
+| `progress` | `{"stage": "...", "message": "..."}` | One per pipeline stage, as it starts |
+| `result` | the full `ChatResponse` (same shape as above) | Terminal — the answer |
+| `error` | `{"message": "..."}` | Terminal — pipeline failed (the non-stream endpoint returns `502` instead; the assistant error turn is still persisted) |
+
+Stages: `start` (question received), `gpu_wait` (another GPU task holds the lock), `gpu` (loading the chat-group models onto the GPU — only when the GPU was last used by lift, or on the very first request after startup), `graph` (reading the patient's graph facts), `retrieve`, `generate` (local LLM draft), `extract` (claim splitting), `verify` (one event per claim: "Verifying claim i of n"). `gpu_wait`/`gpu` appear only when applicable.
+
+```
+event: progress
+data: {"stage": "generate", "message": "Drafting an answer with the local model"}
+
+event: result
+data: {"id": "...", "answer": "...", "claims": [...], "citations": [], "created_at": "..."}
+```
+
+`citations` are the reranked passages the answer was drafted from (patient-document chunks and public reference pages, `score` is `null` here — only the search endpoints compute it). Every claim carries **`source_filenames`**: all uploaded documents it rests on. A `DERIVED` trend claim lists the documents of *both* readings (e.g. `["march.pdf", "sept.png"]`); `source_filename` is the first of them, kept for older clients. Claims backed only by a public reference carry `source_url` instead and an empty `source_filenames`.
+
+### `GET /api/chat/messages?limit=200`
+The most recent `limit` persisted turns, **oldest first**, for rebuilding the conversation after a reload.
+```json
+[
+  { "id": "…", "role": "user", "content": "What is my LDL?", "claims": null, "created_at": "2026-10-04T13:00:00Z" },
+  { "id": "…", "role": "assistant", "content": "Your LDL is 112 mg/dL.", "claims": [ { "statement": "…", "status": "DERIVED", "confidence": 0.75, "…": "…" } ], "created_at": "…" }
+]
+```
 
 ---
 
 ## 3. Documents
 
 ### `POST /api/documents/upload`
-Accepts `multipart/form-data` with field `file` (PDF, PNG, JPEG). Streams upload with a 25MB safety cap (`UPLOAD_MAX_SIZE_BYTES`), saves original artifact to disk as `{uuid4}.{ext}`, writes row to PostgreSQL `documents` table, and queues background ML ingestion.
+Accepts `multipart/form-data` with field `file` (PDF, PNG, JPEG). Streams upload with a 25MB safety cap (`UPLOAD_MAX_SIZE_BYTES`), saves original artifact to disk as `{uuid4}.{ext}`, writes row to PostgreSQL `documents` table, and queues background ML ingestion — follow it with `GET /api/documents/{id}/events` (SSE) below instead of polling. Do **not** also call `/process`: upload already queues processing.
 
 **Response** `DocumentUploadResponse`
 ```json
@@ -124,7 +157,16 @@ Queries document status and processing metadata.
 }
 ```
 
-*(Note: `GET /api/documents` to list all uploaded documents in PostgreSQL is tracked on the backlog).*
+### `DELETE /api/documents/{document_id}`
+Removes a document everywhere it was written: its Chroma chunks, its Neo4j facts (observations, medications, conditions, the `Document` node), the stored file, and the Postgres row. `204` on success; `404` unknown id; `409` while the document is still `processing`. Cleanup errors are **not** swallowed (the endpoint returns `500` and keeps the row so you can retry) — a "deleted" document whose facts still answer chat would be a silent privacy failure.
+
+### `GET /api/documents/{document_id}/events` (SSE)
+Live ingestion progress for one document. `Content-Type: text/event-stream`; browser `EventSource` works (GET). Replays every event published so far, then streams new ones, and closes after the terminal event — so connecting late or reconnecting never misses a stage. A `: keep-alive` comment is sent every 15s of silence.
+
+Each frame is `event: progress` with `data: {"stage": "...", "message": "..."}`. Stages, in order: `queued`, `gpu_wait` (only if another GPU task is running), `gpu` (loading vision models onto the GPU — evicts the chat models), `extract` (lift reading the document, ~1 min), `index` (embedding passages — loads chat models back), `graph` (writing labs/medications/conditions), then terminal `processed` (message `"Done"`) or `failed` (message = the error text). Returns `404` for an unknown id. History lives in backend memory: for a document with none (e.g. after a backend restart) the stream emits one event carrying its stored status and closes.
+
+### `GET /api/documents`
+All uploaded documents, newest first (`DocumentRead[]`, same shape as `GET /{document_id}`). The documents page uses this as its source of truth (no more `localStorage`).
 
 ---
 
@@ -194,7 +236,9 @@ Builds chronological time-series points grouped by observation name for all nume
 ## 5. Evidence & Claims
 
 ### `GET /api/search/evidence?query=...&top_k=5`
-Executes hybrid BM25 + dense vector search via MedCPT embeddings in Chroma, fused with Reciprocal Rank Fusion ($k=60$).
+Hybrid BM25 + dense MedCPT search fused with Reciprocal Rank Fusion ($k=60$) over a wide candidate pool (max(20, 4×`top_k`)), then reranked with the same cross-encoder + authority + recency scoring chat uses (`app/services/evidence_search.py`). Results are returned best-first.
+
+`score` is the **MedCPT cross-encoder relevance in [0, 1]** (sigmoid of its logit) for that passage against the query — not the combined rank score. It is near 1.0 for clearly relevant passages and drops for marginal ones (e.g. 0.66, 0.40, 0.13), so when every hit is relevant they all show ~100%. `source_filename` is the name the user uploaded, not the stored `<uuid>` name.
 
 **Response** `list[EvidenceCitation]`
 ```json
@@ -213,16 +257,16 @@ Executes hybrid BM25 + dense vector search via MedCPT embeddings in Chroma, fuse
 ```
 
 ### `POST /api/evidence/retrieve`
-Request-body equivalent of the search endpoint: `{"query": "...", "top_k": 5}` → `{"citations": [...]}`.
+Request-body equivalent of the search endpoint (same retrieve → rerank → scored citations): `{"query": "...", "top_k": 5}` → `{"citations": [...]}`.
 
 ### `POST /api/evidence/verify`
-Retrieves candidate evidence for a standalone claim string and executes BART-large-MNLI NLI verification under `GPU_LOCK`.
+Retrieves candidate evidence for a standalone claim string and executes BART-large-MNLI NLI verification inside `gpu_mode(CHAT)`.
 
 **Request**: `{"claim": "Patient was prescribed Metformin 500mg daily."}`  
 **Response**: `{"claim": { ...Claim shape... }}`
 
 ### `POST /api/claims/extract`
-Standalone atomic claim extraction using `qwen3.5:9b`. Returns claims with status `UNCERTAIN` and `confidence: null` (extraction only, no verification).
+Standalone atomic claim extraction using the local chat model (`medgemma:4b`). Returns claims with status `UNCERTAIN` and `confidence: null` (extraction only, no verification).
 
 **Request**: `{"text": "Patient has hypertension and elevated LDL."}`  
 **Response**: `{"claims": [ { "statement": "Patient has hypertension.", "status": "UNCERTAIN", ... } ]}`

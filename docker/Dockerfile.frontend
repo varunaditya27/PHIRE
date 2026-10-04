@@ -1,26 +1,30 @@
-# Compose-driven build for the Next.js frontend service.
-# Referenced by docker/docker-compose.yml's `frontend` service (build
-# context: ../frontend, dockerfile: docker/Dockerfile.frontend).
+# Next.js frontend image, used by docker/docker-compose.yml's `frontend` service
+# (build context: ../frontend, dockerfile: docker/Dockerfile.frontend).
 #
-# Generic containerization only — app code/structure under frontend/ is
-# Shashwati's; this file lives in docker/ per REPO_STRUCTURE.md's
-# ownership split (docker/ is Anika's).
+# Generic containerization only -- app code under frontend/ is Shashwati's; this file lives in
+# docker/ per REPO_STRUCTURE.md's ownership split (docker/ is Anika's).
+#
+# NEXT_PUBLIC_API_URL is a BUILD argument: Next inlines NEXT_PUBLIC_* into the JS bundle during
+# `next build`, so setting it at container run time does nothing. Compose passes it as a build arg.
 
 FROM node:20-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 FROM node:20-slim
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/.next ./.next
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/package.json ./package.json
 
+USER node
 EXPOSE 3000
 
 CMD ["npm", "start"]

@@ -103,6 +103,10 @@ class HybridRetriever:
             self._chunks[cid] = Chunk(id=cid, text=text, metadata=dict(metadata))
         self._rebuild_bm25()
 
+    def move_to(self, device: str) -> None:
+        """Move the embedding encoders to `device` (see backend gpu_modes.py)."""
+        self._embedder.move_to(device)
+
     def add_documents(self, chunks: list[Chunk]) -> None:
         """Index chunks into both the Chroma vector store and the BM25 lexical index."""
         if not chunks:

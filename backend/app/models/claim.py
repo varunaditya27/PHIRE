@@ -30,6 +30,7 @@ class Claim(BaseModel):
     confidence: float | None = None
     source_url: str | None = None
     source_filename: str | None = None
+    source_filenames: list[str] = []  # every uploaded document the claim rests on (a trend spans several)
     source_span: tuple[int, int] | None = None
 
 

@@ -243,3 +243,27 @@ This multi-stage pipeline introduced severe VRAM contention on 8GB GPUs (competi
    - Retired `ml/rag/ingest/ocr.py`, `ml/rag/ingest/table_parsing.py`, and `ml/graph/prose_extraction.py`.
    - Cleaned up backend singletons (`get_lift_extractor()`) and wrapped processing in `GPU_LOCK`.
    - Test suite expanded to 217 total tests (200 unit tests passing offline with 0 failures).
+
+---
+
+## 2026-10-04: First real-model lift run, NLI template-contradiction failure, 8GB GPU budgeting
+
+Evidence from running the post-`[0.6.0]` pipeline live (RTX 5050 Laptop, 8GB; synthetic one-page lab PDF; real `datalab-to/lift`, `medgemma:4b`, MedCPT, BART-large-MNLI). Raw numbers are single-run, single-document — indicative, not a benchmark.
+
+### 1. "Quantized lift" was silently not quantized
+
+The `[0.6.0]` code passed `model_name=`, `quantization_config=`, `device=` to `lift.model.InferenceManager` inside `try/except TypeError`. `InferenceManager.__init__(self, method)` takes only `method`, so the call always raised and the fallback `InferenceManager(method="hf")` loaded lift's default path (`AutoModelForImageTextToText`, `dtype=bfloat16`, `device_map="auto"`) — 18GB of weights on a 22GB-RAM / 8GB-VRAM machine, mostly offloaded to CPU. Unit tests passed because they mocked `InferenceManager`. **Lesson: a mocked constructor cannot validate kwargs; the only evidence is a real load.** Architecture split (from `init_empty_weights`): language model 7.94B, `lm_head` 1.02B, vision tower 0.46B parameters.
+
+Fix: build the model with transformers (`BitsAndBytesConfig` NF4, double-quant, bf16 compute, `llm_int8_skip_modules=["visual"]`) and inject it into an `InferenceManager(method="vllm")` shell. Result: 56s load, 5.94GiB resident, 6.53GiB peak during extraction, 37s extract. Output quality on the sample: all 6 lab values, units, reference ranges and interpretations correct, including the compound `148/92 mmHg`; both medications (dose + frequency) and both conditions correct; dates extracted as written (`"12 March 2026"`) and normalized downstream to `2026-03-12`. Not evaluated: scanned/photographed documents, multi-page, low-quality scans, handwriting — the quantization accuracy cost is unmeasured.
+
+### 2. BART-MNLI "contradiction" between same-template sentences (verification failure mode)
+
+Patient facts are rendered as `"<Metric>: <value> <unit> (reference range …) -- <flag> on <date>."` and chat claims as `"My LDL cholesterol was 138 mg/dL on 2026-03-12."` For that claim, NLI scored per fact: LDL fact entail 0.99 / contra 0.00; **HDL fact entail 0.00 / contra 1.00**; triglycerides 0.03 / 0.26; others ≈0. The old selection rule (strongest signal in either direction) picked the HDL fact → `CONFLICTING`, confidence 0.29, claim dropped; the final answer lost the value entirely and kept only the unanchored second sentence. NLI treats "same template, different number" as contradiction even when the sentences are about different quantities. Mitigation implemented: a chunk with entailment ≥ threshold decides the verdict. Open question for the paper: this masks *true* conflicts when another chunk entails the claim; a metric-aware pre-filter (match the claim's analyte to the fact's analyte before NLI) would be a cleaner fix, and the verifier is still unbatched (one forward pass per chunk).
+
+### 3. Latency and GPU residency on 8GB
+
+Measured VRAM: lift extracting ≈ 6.5GiB peak; chat group (MedCPT query+article encoders, cross-encoder, BART, Ollama `medgemma:4b`) ≈ 6.9GB total, of which Ollama got only ~2.3 of its 3.5GiB on-GPU. Observed Ollama behavior: a model loaded while the GPU was occupied ran mostly on CPU (`size_vram` 0.1 of 2.7GiB) and stayed that way until explicitly unloaded — chat latency 55–61s vs 36s after unload+reload on GPU. With mutually-exclusive LIFT/CHAT modes (no swap on consecutive chats): warm chat 5.6s, first chat after an upload ≈ 15s, ingestion 73s end-to-end, a cold first chat after backend start ≈ 34s (21s of it loading the chat models, now surfaced to the user via SSE).
+
+### 4. UX finding: silent waits
+
+Ingestion (~70–90s) and cold chat (up to ~35s) had no feedback beyond a spinner/polling. Stage-level SSE (document stages; chat pipeline stages with per-claim "verifying i of n") was added. Token streaming was deliberately not added: the displayed answer is assembled only from verified claims, so draft tokens would show text that may be dropped.

@@ -25,20 +25,16 @@ from app.models.response import (
     EvidenceVerifyRequest,
     EvidenceVerifyResponse,
 )
-from app.services.citations import chunk_to_citation
-from app.services.ml_singletons import GPU_LOCK, get_claim_verifier, get_retriever
+from app.services.evidence_search import search_evidence
+from app.services.gpu_modes import CHAT, gpu_mode
+from app.services.ml_singletons import get_claim_verifier, get_retriever
 
 router = APIRouter(prefix="/api/evidence", tags=["evidence"])
 
 
 @router.post("/retrieve", response_model=EvidenceRetrieveResponse)
 def retrieve_evidence(request: EvidenceRetrieveRequest) -> EvidenceRetrieveResponse:
-    # GPU_LOCK: see ml_singletons.py's docstring -- get_retriever() uses
-    # the GPU-resident MedCPT embedding model, same as chat generation and
-    # document ingestion.
-    with GPU_LOCK:
-        chunks = get_retriever().retrieve(request.query, top_k=request.top_k)
-    return EvidenceRetrieveResponse(citations=[chunk_to_citation(chunk) for chunk in chunks])
+    return EvidenceRetrieveResponse(citations=search_evidence(request.query, request.top_k))
 
 
 @router.post("/verify", response_model=EvidenceVerifyResponse)
@@ -50,9 +46,9 @@ def verify_claim(request: EvidenceVerifyRequest) -> EvidenceVerifyResponse:
     # ml.chains.qa_chain.QAChain, which already has a reranked pool in
     # hand from the same turn's retrieval step).
     #
-    # GPU_LOCK: see ml_singletons.py's docstring -- both retrieve() and
+    # gpu_mode(CHAT): see gpu_modes.py + ml_singletons.py's docstring -- both retrieve() and
     # verify() below use GPU-resident models (MedCPT, BART-MNLI).
-    with GPU_LOCK:
+    with gpu_mode(CHAT):
         evidence = get_retriever().retrieve(request.claim, top_k=5)
         verification = get_claim_verifier().verify(request.claim, evidence)
 
@@ -80,6 +76,7 @@ def verify_claim(request: EvidenceVerifyRequest) -> EvidenceVerifyResponse:
         confidence=confidence,
         source_url=metadata.get("url"),
         source_filename=metadata.get("filename"),
+        source_filenames=[metadata["filename"]] if metadata.get("filename") else [],
         source_span=source_span,
     )
     return EvidenceVerifyResponse(claim=claim)
