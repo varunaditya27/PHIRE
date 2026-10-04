@@ -34,10 +34,11 @@
 
 ### Running the Stack (Docker)
 ```bash
-cp .env.example .env
-bash scripts/setup.sh
-docker compose -f docker/docker-compose.yml up -d
+bash scripts/run.sh        # creates .env files if missing, builds, starts, waits for health
+# first time only -- seed the public reference corpus (needs network):
+docker compose --env-file .env -f docker/docker-compose.yml --profile ingest run --rm ingest
 curl -X POST http://localhost:8000/api/health
+# NOTE: always pass --env-file .env to docker compose (it reads docker/.env otherwise). Details: docs/BACKEND_HANDOFF.md section 8.
 ```
 
 ### Running Locally (Development Mode)
@@ -57,7 +58,7 @@ bash scripts/run_frontend.sh
 - [x] Download embedding model (medical-specialized) — MedCPT
 - [x] Setup Chroma vector DB (in-process)
 - [x] Ingest clinical reference documents (MedlinePlus, PubMed, USDA)
-- [x] Design LLM prompt for claim extraction (`medgemma:4b` / `qwen3.5:9b`)
+- [x] Design LLM prompt for claim extraction (`medgemma:4b`)
 - [x] Design claim verification approach — NLI-based (`facebook/bart-large-mnli`)
 - [x] Real RAG chain implemented (`ml/chains/qa_chain.py`)
 - [x] Longitudinal Health Graph implemented in Neo4j (`ml/graph/`)

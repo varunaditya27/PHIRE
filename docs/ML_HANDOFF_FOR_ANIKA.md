@@ -252,7 +252,7 @@ in that case, not a wrong guess. Check for `None` before using it.
    Lift (6.5GiB peak) cannot coexist with MedCPT ×2, the reranker, BART and
    Ollama's chat model (~6.9GB together). The backend's
    `app/services/gpu_modes.py` keeps either the `LIFT` group or the `CHAT`
-   group resident and swaps on change (see `docs/BACKEND_HANDOFF.md` §8).
+   group resident and swaps on change (see `docs/BACKEND_HANDOFF.md` §9).
    To support this, `EmbeddingModel`, `Reranker`, `ClaimVerifier` and
    `HybridRetriever` each expose `move_to(device)` (weights parked in CPU RAM,
    ~1s to restore) and track their device per instance instead of the old

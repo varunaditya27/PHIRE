@@ -73,8 +73,13 @@ cd PHIRE
 cp .env.example .env
 bash scripts/setup.sh
 
-# Start all services (PostgreSQL, Ollama, Neo4j, Backend, Frontend)
-docker compose -f docker/docker-compose.yml up -d
+# Start all services (PostgreSQL, Neo4j, Backend, Frontend). Builds, enables the GPU if an NVIDIA runtime
+# is present, uses the Ollama already running on your host (or starts a bundled one if there is none),
+# and waits until the backend is healthy. Always uses the root .env.
+bash scripts/run.sh
+
+# One-time: seed the public reference corpus (MedlinePlus/PubMed/USDA; needs network)
+docker compose --env-file .env -f docker/docker-compose.yml --profile ingest run --rm ingest
 
 # Verify system health
 curl -X POST http://localhost:8000/api/health
@@ -89,7 +94,7 @@ curl -X POST http://localhost:8000/api/health
 
 Both long waits show live progress over Server-Sent Events: uploads display each ingestion stage (loading the vision model, reading the document, indexing, saving to your timeline), and chat displays each pipeline stage (reading records, searching evidence, drafting, verifying claim *i* of *n*).
 
-> If another app already uses port 3000, 7687 or 5433, run PHIRE on alternates — see [docs/BACKEND_HANDOFF.md §8.3](docs/BACKEND_HANDOFF.md).
+> If another app already uses port 3000, 7687 or 5433, run PHIRE on alternates — see [docs/BACKEND_HANDOFF.md §9.3](docs/BACKEND_HANDOFF.md).
 
 ---
 

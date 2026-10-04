@@ -53,6 +53,29 @@ from app.config import get_settings
 GPU_LOCK = threading.Lock()
 
 
+def preload_ml_modules() -> None:
+    """Import ml/'s heavy modules once, on one thread, before any request is served.
+
+    transformers/torch use lazy imports that are not safe to trigger from two threads at once, and
+    request threads reach them from different places (chat inside the GPU lock, document ingestion
+    before it). Importing everything up front, at startup, removes that race (seen live: a cold
+    backend asked to ingest a document and answer a chat at once failed with
+    "cannot import name 'AutoModel' from 'transformers'"). Imports only -- no model is loaded.
+    """
+    import ml.chains.qa_chain  # noqa: F401
+    import ml.claims.verifier  # noqa: F401
+    import ml.graph.conditions  # noqa: F401
+    import ml.graph.deletion  # noqa: F401
+    import ml.graph.document_dates  # noqa: F401
+    import ml.graph.medications  # noqa: F401
+    import ml.graph.observations  # noqa: F401
+    import ml.rag.ingest.ingest_patient_document  # noqa: F401
+    import ml.rag.ingest.lift_extractor  # noqa: F401
+    import ml.rag.ingest.patient_documents  # noqa: F401
+    import ml.rag.reranker  # noqa: F401
+    import ml.rag.retriever  # noqa: F401
+
+
 @lru_cache
 def get_lift_extractor():
     from ml.rag.ingest.lift_extractor import LiftExtractor

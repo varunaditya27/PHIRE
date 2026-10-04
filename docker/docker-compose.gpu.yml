@@ -1,0 +1,23 @@
+# GPU override: gives the backend (and the optional bundled ollama) the NVIDIA GPU. Layered on top of
+# docker-compose.yml by scripts/run.sh when an NVIDIA container runtime is detected:
+#   docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
+# Needs the NVIDIA Container Toolkit on the host (Fedora: `sudo dnf install nvidia-container-toolkit`,
+# then `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`).
+# Kept separate so the base file still starts on hosts without a GPU.
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  ollama:
+    <<: *gpu
+  backend:
+    <<: *gpu
+  ingest:
+    <<: *gpu

@@ -158,3 +158,38 @@ def test_rollback_ml_writes():
 
         mock_retriever.delete_by_document_id.assert_called_once_with("doc-123")
         mock_del_facts.assert_called_once_with(mock_graph_client, "doc-123")
+
+
+def test_preload_ml_modules_imports_the_heavy_modules_up_front():
+    import sys
+
+    from app.services.ml_singletons import preload_ml_modules
+
+    preload_ml_modules()
+
+    for name in ("ml.rag.retriever", "ml.claims.verifier", "ml.chains.qa_chain", "ml.rag.ingest.lift_extractor"):
+        assert name in sys.modules
+
+
+def test_rollback_builds_the_retriever_under_the_gpu_lock():
+    """get_retriever() may construct Chroma + embedding models; it must not race a chat request doing the same."""
+    from unittest.mock import call
+
+    events = []
+
+    class FakeMode:
+        def __enter__(self):
+            events.append("enter")
+
+        def __exit__(self, *exc):
+            events.append("exit")
+
+    retriever = MagicMock()
+    retriever.delete_by_document_id.side_effect = lambda doc_id: events.append("delete")
+    with patch("app.services.document_processor.gpu_mode", return_value=FakeMode()), \
+         patch("app.services.document_processor.get_retriever", return_value=retriever), \
+         patch("app.services.document_processor.new_graph_client"), \
+         patch("ml.graph.deletion.delete_document_facts"):
+        _rollback_ml_writes("doc-1")
+
+    assert events == ["enter", "delete", "exit"]

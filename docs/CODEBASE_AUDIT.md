@@ -80,11 +80,11 @@ This comprehensive audit surfaces all implemented features, remaining functional
 
 ## 4. Bugs, Failure Modes & Edge Cases
 
-### 4.1 Standalone Backend Dockerfile (`docker/Dockerfile.backend.standalone`)
+### 4.1 Standalone Backend Dockerfile (`docker/Dockerfile.backend.standalone`) — *removed in `[0.8.0]`; original finding below*
 - **Location**: [`docker/Dockerfile.backend.standalone:L1-L29`](file:///home/varun/Projects/PHIRE/docker/Dockerfile.backend.standalone#L1-L29)
 - **Bug**: Builds only from `backend/` context and installs only `backend/requirements.txt`. Because `backend/` now imports `ml.*` singletons, running this container crashes immediately with `ModuleNotFoundError: No module named 'ml'`.
 
-### 4.2 Database Migrations Not Applied on Docker Backend Launch
+### 4.2 Database Migrations Not Applied on Docker Backend Launch — *fixed in `[0.8.0]` (`docker/backend-entrypoint.sh`); original finding below*
 - **Location**: [`docker/Dockerfile.backend:L43`](file:///home/varun/Projects/PHIRE/docker/Dockerfile.backend#L43)
 - **Bug**: `CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]` does not run `alembic upgrade head`. Running a clean `docker compose up` on a fresh volume leaves PostgreSQL without tables. (Local script `scripts/run_backend.sh:L22` runs migrations correctly).
 
@@ -112,7 +112,7 @@ This comprehensive audit surfaces all implemented features, remaining functional
 `ml.local_only.require_localhost()` strictly validates that outbound service hostnames resolve to `{"localhost", "127.0.0.1", "::1"}` to eliminate DNS rebinding and cloud data egress. To satisfy this inside Docker without custom code exceptions, `backend` and `nginx` run with `network_mode: host` in `docker-compose.yml`.
 
 ### 5.2 GPU Residency Modes (`gpu_mode`, wrapping `GPU_LOCK`)
-Quantized `datalab-to/lift` (4-bit NF4, ~6.5GiB peak) cannot share an 8GB GPU with the chat-time models (MedCPT ×2, reranker, BART-MNLI, Ollama `medgemma:4b`, ~6.9GB). [`backend/app/services/gpu_modes.py`](file:///home/varun/Projects/PHIRE/backend/app/services/gpu_modes.py)'s `gpu_mode(LIFT|CHAT)` holds the process-wide `GPU_LOCK` from [`ml_singletons.py`](file:///home/varun/Projects/PHIRE/backend/app/services/ml_singletons.py) and, only when the mode changes, evicts the other group (in-process models parked in CPU RAM via `move_to`, Ollama unloaded via its API). Same-mode requests are no-ops. Details: `docs/BACKEND_HANDOFF.md` §8.
+Quantized `datalab-to/lift` (4-bit NF4, ~6.5GiB peak) cannot share an 8GB GPU with the chat-time models (MedCPT ×2, reranker, BART-MNLI, Ollama `medgemma:4b`, ~6.9GB). [`backend/app/services/gpu_modes.py`](file:///home/varun/Projects/PHIRE/backend/app/services/gpu_modes.py)'s `gpu_mode(LIFT|CHAT)` holds the process-wide `GPU_LOCK` from [`ml_singletons.py`](file:///home/varun/Projects/PHIRE/backend/app/services/ml_singletons.py) and, only when the mode changes, evicts the other group (in-process models parked in CPU RAM via `move_to`, Ollama unloaded via its API). Same-mode requests are no-ops. Details: `docs/BACKEND_HANDOFF.md` §9.
 
 ### 5.2b SSE progress
 `POST /api/chat/stream` and `GET /api/documents/{id}/events` stream stage-level progress (frame formats in `docs/API_REFERENCE.md`). Document events come from the in-memory `app/services/progress.py` channel (single-process); chat events from `QAChain.answer(on_progress=...)` via a queue from a worker thread.

@@ -105,7 +105,7 @@ export interface ProgressEvent {
   message: string;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Custom fetch wrapper
 async function fetchAPI<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

@@ -25,7 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # --- Database (PostgreSQL + pgvector) ---
+    # --- Database (PostgreSQL, relational only -- Chroma is the vector store) ---
     database_url: str = "postgresql+psycopg2://phire:phire@localhost:5432/phire"
 
     # --- Ollama ---

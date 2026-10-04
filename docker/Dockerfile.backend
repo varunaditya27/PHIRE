@@ -1,42 +1,50 @@
-# Compose-driven build for the FastAPI backend service.
-# Referenced by docker/docker-compose.yml's `backend` service (build
-# context: repo root "..", dockerfile: docker/Dockerfile.backend -- the
-# sole compose file; see its own header comment). See
-# docker/Dockerfile.backend.standalone for the standalone single-service
-# equivalent (ml/-free, kept separately) — keep the two in sync where
-# they overlap. Build-time file exclusions live alongside this file at
-# docker/Dockerfile.backend.dockerignore, not a repo-root .dockerignore.
+# Backend (FastAPI) image, used by docker/docker-compose.yml's `backend` and `ingest` services
+# (build context: repo root "..", dockerfile: docker/Dockerfile.backend). This is the only
+# backend image: the backend cannot run without ml/ (every ML route imports it), so the old
+# ml/-free "standalone" Dockerfile was removed -- it crashed on `import ml` at startup.
+# Build-time exclusions live in docker/Dockerfile.backend.dockerignore (BuildKit looks for
+# <dockerfile>.dockerignore next to the Dockerfile).
 #
-# Build context is the repo root, not backend/ -- this image installs
-# ml/'s Python dependencies (torch, transformers, neo4j driver, etc, per
-# ml/requirements.txt) alongside backend's own, so router_chat.py /
-# router_claims.py / router_evidence.py / router_search.py's real
-# `import ml....` calls (see app/services/ml_singletons.py) actually
-# resolve inside the container instead of ImportError-ing. ml/'s *source*
-# still isn't baked into the image, though -- docker-compose mounts ../ml
-# read-only at /app/ml at runtime (see docker/docker-compose.yml), so
-# editing ml/ locally doesn't require an image rebuild, only its
-# dependency list changing does.
+# The build context is the repo root because this image installs ml/'s Python dependencies
+# (torch, transformers, lift, neo4j driver, ...) alongside backend's own, and bakes in ml/'s
+# source. (It used to bind-mount ../ml at runtime; on SELinux hosts such as Fedora the container
+# could not read that mount at all, and a deployment should not depend on a live checkout.) ml/
+# is copied after the dependency layer, so editing it only rebuilds the last, tiny layers.
+#
+# Runs as a non-root user (compose overrides the uid/gid to match the host user so files in the
+# bind-mounted data dir are yours). Model weights are cached under /hf (a volume), not in the image.
 
-FROM python:3.11-slim
+# 3.12, not 3.11: lift-pdf requires Python >= 3.12 (pip finds no matching version on 3.11).
+FROM python:3.12-slim
 
-# libpq-dev + build-essential for psycopg2 and any ml/ deps needing a
-# native build. Visual document extraction (datalab-to/lift) runs in-process
-# via PyTorch and does not need the system tesseract-ocr binary.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/hf \
+    TORCH_HOME=/hf/torch \
+    XDG_CACHE_HOME=/hf/xdg
+
+# libpq-dev + build-essential for psycopg2 and any ml/ dependency needing a native build.
+# Visual extraction (datalab-to/lift) runs in-process via PyTorch; no tesseract binary needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1000 phire && useradd -u 1000 -g 1000 -m phire \
+    && mkdir -p /hf && chown phire:phire /hf
 
 WORKDIR /app
 
 COPY backend/requirements.txt ./backend-requirements.txt
 COPY ml/requirements.txt ./ml-requirements.txt
-RUN pip install --no-cache-dir -r backend-requirements.txt -r ml-requirements.txt
+RUN pip install -r backend-requirements.txt -r ml-requirements.txt
 
 COPY backend/app/ ./app
+COPY ml/ ./ml
 COPY backend/alembic.ini .
+COPY docker/backend-entrypoint.sh /usr/local/bin/backend-entrypoint.sh
 
+USER phire
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["backend-entrypoint.sh"]

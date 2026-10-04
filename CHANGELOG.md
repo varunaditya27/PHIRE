@@ -404,7 +404,7 @@ First full live run of upload → lift → graph → timeline → chat since the
 - Frontend: `lib/sse.ts` (fetch-based SSE reader, works for POST), `api.chat.stream` / `api.documents.watch`, `components/progress-steps.tsx` (live step checklist with per-step timer) used by `/chat` and `/documents`; the documents page's 2.5s polling is removed.
 - Tests: `ml/tests/conftest.py` (mock lift by default), `test_gpu_modes.py`, `test_progress.py`, verifier regression test, `on_progress` stage-order test, rewritten `_get_model` tests. **220 passing.**
 
-**Docs updated:** `README.md`, `GET_STARTED.md`, `REPO_STRUCTURE.md`, `ml/README.md`, `backend/README.md`, `docs/API_REFERENCE.md`, `docs/BACKEND_HANDOFF.md` (§8), `docs/FRONTEND_HANDOFF.md`, `docs/ML_HANDOFF_FOR_ANIKA.md`, `docs/BACKLOG.md`, `docs/RESEARCH_LOG.md`.
+**Docs updated:** `README.md`, `GET_STARTED.md`, `REPO_STRUCTURE.md`, `ml/README.md`, `backend/README.md`, `docs/API_REFERENCE.md`, `docs/BACKEND_HANDOFF.md` (§9), `docs/FRONTEND_HANDOFF.md`, `docs/ML_HANDOFF_FOR_ANIKA.md`, `docs/BACKLOG.md`, `docs/RESEARCH_LOG.md`.
 
 ---
 
@@ -472,6 +472,34 @@ Tests: pool-packing and order-restoration tests; **261 passing.** Docs updated: 
 ### fp16 claim verification on CUDA
 
 `ClaimVerifier` now runs BART-large-MNLI in fp16 on CUDA (fp32 on CPU; `move_to` converts in step with the device; softmax computed in fp32). Checked on the 129 hand-labeled pairs (`ml/claims/experiments/eval_data`): accuracy vs gold 0.9690 both ways, 0 argmax-label flips, 0 threshold-status flips, max probability difference 0.0024, pairs sitting at a threshold unchanged. Steady-state typical turn (15 pairs × 3 claims) 1.27s → 0.40s (~3.1×); worst-case pool (105 pairs × 3) ≈ 0.9s vs 7.2s for the original sequential fp32 loop. Peak model VRAM 1.9 → 1.6GiB. Drawback: ~2s one-time kernel warmup on the first verification after startup. Test: `test_place_uses_fp32_on_cpu_and_fp16_on_cuda`.
+
+---
+
+## [0.8.0] - 2026-10-04
+
+### Docker deployment audited end to end, built and run for real
+
+Verified on a throwaway Compose project (own ports, volumes, data dir; dev stack untouched): fresh database → auto-migration → document upload through lift inside the container (GPU visible, non-root) → SSE → chat → reference-corpus claim → backend restart persistence → nginx proxy. `docker/` is Anika's folder; these are cross-folder changes to hand over.
+
+**Fixed (each was a real defect)**
+- The backend image could not be built at all: `lift-pdf` needs Python >= 3.12, the image was 3.11 (broken since `[0.6.0]`). Now `python:3.12-slim`.
+- Compose read `.env` from `docker/`, not the repo root, so the documented root `.env` (ports, passwords, model) was silently ignored. Everything now goes through `--env-file .env` (`scripts/run.sh` does it).
+- `ml/` bind mount was unreadable on SELinux hosts (Fedora) — `ml/` is now baked into the image; the remaining bind mounts carry `:z`.
+- No migrations at container start — `docker/backend-entrypoint.sh` runs `alembic upgrade head` (retrying) then uvicorn.
+- `NEXT_PUBLIC_API_URL` was set at runtime, where Next ignores it — now a build arg; `frontend/lib/api.ts` uses `??` so an empty value means same-origin. Missing `frontend/.dockerignore` meant host `node_modules`/`.env.local` were copied into the build.
+- No GPU: `docker/docker-compose.gpu.yml`, layered on automatically by `scripts/run.sh` when an NVIDIA runtime exists.
+- Privacy: DB/Ollama/frontend ports and the backend were published on all interfaces with no authentication — all now bound to `127.0.0.1`; LAN access is an explicit opt-in (`proxy` profile + `BACKEND_HOST`). Backend runs as non-root. `CORS_ORIGINS` follows `FRONTEND_PORT`.
+- nginx: 1MB upload cap (413 on every real PDF), no SSE-safe settings, hardcoded ports, IPv6 `localhost` refusals — now `docker/nginx.conf.template` (templated ports, 25MB, unbuffered SSE, `127.0.0.1`).
+- Cold-start race, reproduced in Docker: a document ingesting while a chat arrives on a fresh backend failed (`cannot import name 'AutoModel' from 'transformers'`, Chroma `KeyError`). `preload_ml_modules()` imports ml's heavy modules once at startup (lifespan) and the failure rollback now takes the GPU lock. Tests added.
+- `pgvector/pgvector:pg16` replaced by `postgres:16` — pgvector was never used (Chroma is the vector store); the dev DB had only `plpgsql`.
+- The broken ml/-free `Dockerfile.backend.standalone` was removed (backend cannot run without `ml/`).
+
+**Added**
+- Ollama: the backend uses the **host's** Ollama by default (`OLLAMA_HOST`); the bundled container (`ollama` + one-shot `ollama-pull`) is opt-in (`--profile ollama`), enabled by `scripts/run.sh` only if no host Ollama is found. Stale `qwen3.5:9b` pull instructions removed — only `medgemma:4b` is used.
+- `ingest` profile to seed the public reference corpus; healthchecks and `depends_on` ordering; `restart: unless-stopped`; `scripts/run.sh` rewritten (GPU/Ollama detection, health wait, `down`); new `.env.example` variables (`PHIRE_UID/GID`, `PHIRE_DATA_DIR`, `HF_CACHE_DIR`, `OLLAMA_MODELS_DIR`, `BACKEND_HOST`, `PROXY_PORT`, `NEXT_PUBLIC_API_URL`).
+- Tests: `preload_ml_modules`, rollback-under-lock; **264 passing.**
+
+**Docs updated:** `README.md`, `GET_STARTED.md`, `REPO_STRUCTURE.md`, `docs/BACKEND_HANDOFF.md` (§8 Docker; GPU/SSE section renumbered §9), `docs/BACKLOG.md`, `docs/CODEBASE_AUDIT.md`, `docs/API_REFERENCE.md`, `.env.example`.
 
 ---
 

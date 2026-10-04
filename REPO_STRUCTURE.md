@@ -171,16 +171,17 @@ phire/
 │   └── (ArchEHR-QA & MedHallBench benchmarks)
 │
 ├── docker/
-│   ├── Dockerfile.backend          # Root context backend container (backend + ml dependencies)
+│   ├── Dockerfile.backend          # Backend image (python 3.12; backend + ml dependencies; non-root)
 │   ├── Dockerfile.backend.dockerignore
-│   ├── Dockerfile.backend.standalone # Legacy standalone scaffold
-│   ├── Dockerfile.frontend         # Next.js multi-stage build container
-│   ├── docker-compose.yml          # Full-stack composition (Postgres, Ollama, Neo4j, Backend, Frontend)
-│   └── nginx.conf                  # Host-networked reverse proxy
+│   ├── backend-entrypoint.sh       # alembic upgrade head, then uvicorn (single worker)
+│   ├── Dockerfile.frontend         # Next.js multi-stage build (NEXT_PUBLIC_API_URL is a build arg)
+│   ├── docker-compose.yml          # Full stack: Postgres, Neo4j, Backend, Frontend; ollama / ingest / proxy profiles (host Ollama by default)
+│   ├── docker-compose.gpu.yml      # NVIDIA GPU reservations layered on by scripts/run.sh
+│   └── nginx.conf.template         # Optional host-networked reverse proxy (templated ports, 25MB uploads, SSE-safe)
 │
 ├── scripts/
 │   ├── setup.sh                    # Shared environment & venv setup
-│   ├── run.sh                      # Full-stack docker compose startup
+│   ├── run.sh                      # Full-stack docker compose startup (GPU auto-detect, health wait; `down` to stop)
 │   ├── run_backend.sh              # Local FastAPI runner with Alembic migrations & PYTHONPATH
 │   ├── run_frontend.sh             # Local Next.js runner
 │   └── reset_data.py               # Wipe patient data from Postgres/Neo4j/Chroma/uploads (see README)

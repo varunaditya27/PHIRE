@@ -1,0 +1,10 @@
+# Keep the host's installs/builds/secrets out of the image build context: `COPY . .` would otherwise
+# overwrite the container's `npm ci` node_modules with the host's and bake .env.local into the image.
+node_modules
+.next
+out
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.git

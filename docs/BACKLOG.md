@@ -80,18 +80,21 @@ resolved or new ones are found; don't let it silently go stale.
 
 ## 4. `docker/` & Infrastructure
 
-- **`docker/Dockerfile.backend.standalone` is broken**:
-  Builds from `backend/` only and installs only `backend/requirements.txt`. Crashes with `ModuleNotFoundError: No module named 'ml'` on startup because backend strictly requires `ml/`.
-- **`docker/Dockerfile.backend` lacks automated startup migrations**:
-  Does not run `alembic upgrade head` in its `CMD`, leaving a fresh Docker PostgreSQL instance without tables until manually migrated.
-- **`docker/Dockerfile.frontend` missing build argument**:
-  Does not declare `ARG NEXT_PUBLIC_API_URL` before `npm run build`, preventing runtime API URL customization in containerized production builds.
-- **Missing GPU pass-through in `docker/docker-compose.yml`**:
-  Lacks GPU device reservations for `ollama` and `backend`, running inference on CPU inside containers unless configured.
-- **Missing repository scripts**:
-  `scripts/eval.sh` and `scripts/demo.sh` (listed in `REPO_STRUCTURE.md`) do not exist on disk.
-- **Docker Host Networking Platform Nuance**:
-  Host networking (`network_mode: host`) is Linux-native. macOS and Windows Docker Desktop require version 4.29+ with host-networking beta enabled.
+Audited and reworked end to end in `[0.8.0]` (see `CHANGELOG.md`); the previous items are resolved:
+
+- ~~`Dockerfile.backend.standalone` broken~~ — removed (the backend cannot run without `ml/`).
+- ~~No startup migrations~~ — `docker/backend-entrypoint.sh` runs `alembic upgrade head` (with retries) before uvicorn.
+- ~~Frontend missing build arg~~ — `ARG NEXT_PUBLIC_API_URL`, passed as a compose build arg.
+- ~~No GPU pass-through~~ — `docker/docker-compose.gpu.yml`, layered on by `scripts/run.sh` when an NVIDIA runtime is detected.
+- ~~Missing `scripts/eval.sh` / `scripts/demo.sh`~~ — no longer listed in `REPO_STRUCTURE.md` (there is no `evaluation/` yet; add the scripts when it exists).
+- Also found and fixed: a cold-start race (concurrent first imports of `transformers` and concurrent Chroma client creation) that failed a chat sent while a document was being ingested; the bundled Ollama container duplicated the host Ollama (now opt-in); bind-mounted `ml/` was unreadable under SELinux (now baked into the image); the nginx config hardcoded ports and `localhost` (IPv6 refusals); the backend image could not build at all (`lift-pdf` needs Python >= 3.12, image was 3.11); Compose ignored the repo-root `.env` (reads `docker/.env`); `frontend/` had no `.dockerignore` (host `node_modules` and `.env.local` were copied into the build); database/Ollama/frontend ports and the backend were published on all interfaces with no authentication; nginx capped uploads at 1MB (413 on every real PDF) and lacked SSE-safe proxy settings; CORS did not follow `FRONTEND_PORT`; nothing seeded the reference corpus or pulled the chat model; the compose `postgres` was the pgvector image although pgvector is unused (now `postgres:16`).
+
+Still open:
+- **Host networking is Linux-native.** macOS/Windows Docker Desktop need 4.29+ with the host-networking beta; the `require_localhost` privacy guard in `ml/` is why the backend is host-networked rather than on a bridge network.
+- **Image size.** The backend image installs PyTorch's CUDA wheels (~10GB). A CPU-only build variant would be far smaller but is not provided.
+- **First start is slow and needs network** (lift's 18GB and the other Hugging Face weights download on first use). Mount an existing cache via `HF_CACHE_DIR` to avoid re-downloading. Ollama is the host's; its model must already be pulled (`scripts/run.sh` warns if not).
+- **One worker only.** `gpu_modes.py` and `progress.py` are per-process; do not raise uvicorn's worker count.
+- **No automated Docker smoke test in CI** (verified by hand in `[0.8.0]`); `nginx` profile not load-tested.
 
 ---
 
@@ -124,3 +127,7 @@ Document list and chat history now persist server-side; blood pressure is numeri
 - `scripts/reset_data.py` for a clean start (README "Start from scratch").
 
 Still open: compound/composite shapes outside the registry (e.g. orthostatic "supine 148/92, standing 130/80" in one value, paediatric "lb oz" weights, comparator values like `>90`) are left as text; the registry is one dict entry per shape. HbA1c dual units are intentionally one observation (first number = the %).
+
+## 9. Resolved in `[0.8.0]`
+
+The whole Docker deployment (see §4): builds on Python 3.12, migrates on start, GPU override, loopback-only ports, SELinux-safe, host Ollama by default, templated nginx, `.dockerignore`, and a cold-start concurrency fix. Verified by hand on a throwaway Compose project (own ports, volumes and data dir): fresh database → migrations → upload through lift inside the container → SSE → chat → reference-corpus claim → restart persistence → nginx proxy (3MB upload, streaming).

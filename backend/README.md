@@ -68,7 +68,7 @@ PostgreSQL (SQLAlchemy)              Chroma (via ml/)      Neo4j (via ml/)
 | `/api/evidence` | `POST /retrieve`, `POST /verify` | `ml.rag.retriever`, `ml.claims.verifier` |
 | `/api/recommendations` | `GET /fitness`, `GET /nutrition` | `ml.recommendations.*` (nutrition is a stub — 501) |
 
-The two SSE endpoints stream stage-by-stage progress (`progress` events, then a terminal `result`/`error` for chat; replay-then-live until `processed`/`failed` for documents) — frame formats in [docs/API_REFERENCE.md](../docs/API_REFERENCE.md). Every GPU-touching route runs inside `gpu_mode(...)` (`services/gpu_modes.py`): the lift group and the chat-model group are mutually exclusive on an 8GB GPU — see [docs/BACKEND_HANDOFF.md §8](../docs/BACKEND_HANDOFF.md).
+The two SSE endpoints stream stage-by-stage progress (`progress` events, then a terminal `result`/`error` for chat; replay-then-live until `processed`/`failed` for documents) — frame formats in [docs/API_REFERENCE.md](../docs/API_REFERENCE.md). Every GPU-touching route runs inside `gpu_mode(...)` (`services/gpu_modes.py`): the lift group and the chat-model group are mutually exclusive on an 8GB GPU — see [docs/BACKEND_HANDOFF.md §9](../docs/BACKEND_HANDOFF.md).
 
 `/api/ping` (in `app/main.py`) is a bare liveness check, separate from the
 dependency-checking `/api/health`.

@@ -104,7 +104,11 @@ def _rollback_ml_writes(document_id) -> None:
 
     document_id = str(document_id)
     try:
-        get_retriever().delete_by_document_id(document_id)
+        # Under the GPU lock because get_retriever() may construct the retriever (a Chroma client + the
+        # embedding models); doing that concurrently with a chat request doing the same raised
+        # KeyError on the Chroma path (seen live on a cold container).
+        with gpu_mode(CHAT):
+            get_retriever().delete_by_document_id(document_id)
     except Exception as exc:  # noqa: BLE001 -- best-effort; don't mask the original failure
         print(f"document_processor: failed to roll back Chroma chunks for {document_id}: {exc}")
     try:

@@ -52,7 +52,7 @@ Fast liveness probe with zero dependency checks.
 ## 2. Chat
 
 ### `POST /api/chat`
-The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generation (`medgemma:4b`) → atomic claim extraction (`qwen3.5:9b`) → NLI verification (`facebook/bart-large-mnli`) → confidence scoring → claim filtering and abstention. Runs inside `gpu_mode(CHAT)` (see [BACKEND_HANDOFF.md](BACKEND_HANDOFF.md)). Single blocking JSON call; use `POST /api/chat/stream` below when the caller wants live progress.
+The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generation (`medgemma:4b`) → atomic claim extraction (the same local model, `medgemma:4b`) → NLI verification (`facebook/bart-large-mnli`) → confidence scoring → claim filtering and abstention. Runs inside `gpu_mode(CHAT)` (see [BACKEND_HANDOFF.md](BACKEND_HANDOFF.md)). Single blocking JSON call; use `POST /api/chat/stream` below when the caller wants live progress.
 
 **Request** `ChatRequest`
 ```json
@@ -266,7 +266,7 @@ Retrieves candidate evidence for a standalone claim string and executes BART-lar
 **Response**: `{"claim": { ...Claim shape... }}`
 
 ### `POST /api/claims/extract`
-Standalone atomic claim extraction using `qwen3.5:9b`. Returns claims with status `UNCERTAIN` and `confidence: null` (extraction only, no verification).
+Standalone atomic claim extraction using the local chat model (`medgemma:4b`). Returns claims with status `UNCERTAIN` and `confidence: null` (extraction only, no verification).
 
 **Request**: `{"text": "Patient has hypertension and elevated LDL."}`  
 **Response**: `{"claims": [ { "statement": "Patient has hypertension.", "status": "UNCERTAIN", ... } ]}`
