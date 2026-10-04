@@ -13,7 +13,7 @@ from ml.graph.client import GraphClient
 from ml.graph.observations import DEFAULT_PATIENT_ID
 
 
-def _fetch_observations(client: GraphClient, patient_id: str) -> list[dict]:
+def fetch_observations(client: GraphClient, patient_id: str) -> list[dict]:
     """Every stored Observation, oldest effective date first."""
     return client.run(
         "MATCH (:Patient {id: $patient_id})-[:HAS_OBSERVATION]->(o:Observation) "
@@ -25,39 +25,53 @@ def _fetch_observations(client: GraphClient, patient_id: str) -> list[dict]:
     )
 
 
-def _format_observation(row: dict) -> str:
+def format_observation(row: dict) -> str:
     detail = f" (reference range {row['reference_range']})" if row["reference_range"] else ""
     flag = f" -- {row['interpretation']}" if row["interpretation"] else ""
     return f"{row['code']}: {row['raw_value']}{detail}{flag} on {row['effective']}."
 
 
-def _fetch_medication_facts(client: GraphClient, patient_id: str) -> list[tuple[str, str | None]]:
-    """(fact sentence, source filename) for every stored medication."""
-    facts = []
-    for row in client.run(
+def fetch_medications(client: GraphClient, patient_id: str) -> list[dict]:
+    """Every stored medication row (code, dosage, frequency, status, effective, source filename)."""
+    return client.run(
         "MATCH (:Patient {id: $patient_id})-[:HAS_MEDICATION]->(m:Medication) "
         "OPTIONAL MATCH (m)-[:FROM_DOCUMENT]->(d:Document) "
         "RETURN d.filename AS filename, m.code AS code, m.dosage AS dosage, m.frequency AS frequency, "
-        "m.status AS status",
+        "m.status AS status, m.effective AS effective",
         patient_id=patient_id,
-    ):
-        dose = f" {row['dosage']}" if row["dosage"] else ""
-        freq = f" {row['frequency']}" if row["frequency"] else ""
-        facts.append((f"Medication: {row['code']}{dose}{freq} ({row['status']}).", row.get("filename")))
-    return facts
+    )
+
+
+def fetch_conditions(client: GraphClient, patient_id: str) -> list[dict]:
+    """Every stored condition row (code, status, effective, source filename)."""
+    return client.run(
+        "MATCH (:Patient {id: $patient_id})-[:HAS_CONDITION]->(c:Condition) "
+        "OPTIONAL MATCH (c)-[:FROM_DOCUMENT]->(d:Document) "
+        "RETURN d.filename AS filename, c.code AS code, c.status AS status, c.effective AS effective",
+        patient_id=patient_id,
+    )
+
+
+def format_medication(row: dict) -> str:
+    """One medication row as a plain-text fact sentence."""
+    dose = f" {row['dosage']}" if row.get("dosage") else ""
+    freq = f" {row['frequency']}" if row.get("frequency") else ""
+    return f"Medication: {row['code']}{dose}{freq} ({row['status']})."
+
+
+def format_condition(row: dict) -> str:
+    """One condition row as a plain-text fact sentence."""
+    return f"Condition: {row['code']} ({row['status']})."
+
+
+def _fetch_medication_facts(client: GraphClient, patient_id: str) -> list[tuple[str, str | None]]:
+    """(fact sentence, source filename) for every stored medication."""
+    return [(format_medication(row), row.get("filename")) for row in fetch_medications(client, patient_id)]
 
 
 def _fetch_condition_facts(client: GraphClient, patient_id: str) -> list[tuple[str, str | None]]:
     """(fact sentence, source filename) for every stored condition."""
-    return [
-        (f"Condition: {row['code']} ({row['status']}).", row.get("filename"))
-        for row in client.run(
-            "MATCH (:Patient {id: $patient_id})-[:HAS_CONDITION]->(c:Condition) "
-            "OPTIONAL MATCH (c)-[:FROM_DOCUMENT]->(d:Document) "
-            "RETURN d.filename AS filename, c.code AS code, c.status AS status",
-            patient_id=patient_id,
-        )
-    ]
+    return [(format_condition(row), row.get("filename")) for row in fetch_conditions(client, patient_id)]
 
 
 def get_patient_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID) -> list[str]:
@@ -77,7 +91,7 @@ def get_patient_facts(client: GraphClient, patient_id: str = DEFAULT_PATIENT_ID)
     docstring for why).
     """
     return (
-        [_format_observation(row) for row in _fetch_observations(client, patient_id)]
+        [format_observation(row) for row in fetch_observations(client, patient_id)]
         + [fact for fact, _ in _fetch_medication_facts(client, patient_id)]
         + [fact for fact, _ in _fetch_condition_facts(client, patient_id)]
     )
@@ -102,13 +116,13 @@ def get_current_patient_facts_with_sources(
     them by stable identity, not by date), so they're included in full.
     """
     latest_by_code: dict[str, dict] = {}
-    for row in _fetch_observations(client, patient_id):
+    for row in fetch_observations(client, patient_id):
         # _fetch_observations is ORDER BY o.effective ascending, so each
         # later row for the same code simply overwrites the earlier one.
         latest_by_code[row["code"]] = row
 
     return (
-        [(_format_observation(row), row.get("filename")) for row in latest_by_code.values()]
+        [(format_observation(row), row.get("filename")) for row in latest_by_code.values()]
         + _fetch_medication_facts(client, patient_id)
         + _fetch_condition_facts(client, patient_id)
     )
@@ -139,7 +153,7 @@ def get_trend_facts_with_sources(
     sentences without asking NLI to do the subtraction itself.
     """
     by_code: dict[str, list[dict]] = {}
-    for row in _fetch_observations(client, patient_id):
+    for row in fetch_observations(client, patient_id):
         if row["value"] is not None:
             by_code.setdefault(row["code"], []).append(row)
 

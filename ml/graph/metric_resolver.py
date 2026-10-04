@@ -57,3 +57,8 @@ def resolve_metric(raw_name: str) -> str:
         if normalized == canonical.lower():
             return canonical
     return _ALIAS_TO_CANONICAL.get(normalized, raw_name)
+
+
+def phrasings_for(canonical: str) -> list[str]:
+    """Every lowercase phrasing that refers to a canonical metric: its own name plus its aliases."""
+    return [canonical.lower(), *_METRIC_ALIASES.get(canonical, [])]

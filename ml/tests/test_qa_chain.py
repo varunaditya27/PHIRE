@@ -388,3 +388,78 @@ def test_answer_joins_claims_as_punctuated_sentences():
     answer = build_chain(claims, verdicts).answer("question").answer
 
     assert answer == "HbA1c was 6.1% on 2026-03-12. HbA1c was 5.8% on 2026-09-05. Is it lower?"
+
+
+class RecordingLLM:
+    """FakeLLM that remembers the prompt it was given."""
+
+    def __init__(self):
+        self.prompt = ""
+
+    def generate(self, prompt, **kwargs):
+        self.prompt = prompt
+        return "draft answer text"
+
+
+def _chain_with_graph_ctx(monkeypatch, ctx, claims, verifier, llm=None):
+    monkeypatch.setattr("ml.chains.qa_chain.retrieve_graph_context", lambda client, question: ctx)
+    monkeypatch.setattr("ml.chains.qa_chain.get_current_patient_facts_with_sources",
+                        lambda client: [("LDL Cholesterol: 112 mg/dL on 2026-09-05.", "sept.png")])
+    monkeypatch.setattr("ml.chains.qa_chain.get_trend_facts_with_sources", lambda client: [])
+    return QAChain(retriever=FakeRetriever(), reranker=FakeReranker(), extractor=FakeExtractor(claims),
+                   verifier=verifier, llm_client=llm or FakeLLM(), graph_client=FakeGraphClient())
+
+
+def test_graph_context_focuses_the_prompt_and_keeps_the_latest_snapshot(monkeypatch):
+    from ml.graph.graph_retrieval import GraphContext
+
+    ctx = GraphContext(
+        readings=[("LDL Cholesterol: 138 mg/dL on 2026-03-12.", ["march.pdf"])],
+        derived=[("LDL Cholesterol has 2 readings from 2026-03-12 to 2026-09-05 (overall a decrease of 26.0 mg/dL).", ["march.pdf", "sept.png"])],
+        linked={"metrics": ["LDL Cholesterol"], "medications": [], "conditions": []},
+    )
+    llm, events = RecordingLLM(), []
+
+    _chain_with_graph_ctx(monkeypatch, ctx, [], FakeVerifier({}), llm).answer("How has my LDL changed?", on_progress=lambda s, m: events.append((s, m)))
+
+    assert "[patient record] LDL Cholesterol: 138 mg/dL on 2026-03-12." in llm.prompt          # focused history
+    assert "overall a decrease of 26.0 mg/dL" in llm.prompt                                    # graph-derived summary
+    assert "[patient record] LDL Cholesterol: 112 mg/dL on 2026-09-05." in llm.prompt          # current snapshot kept
+    assert ("graph", "Following links in your health graph: LDL Cholesterol") in events
+
+
+def test_claim_matching_a_graph_derived_sentence_is_derived_and_cites_every_file(monkeypatch):
+    from ml.graph.graph_retrieval import GraphContext
+
+    sentence = "LDL Cholesterol has 2 readings from 2026-03-12 to 2026-09-05 (overall a decrease of 26.0 mg/dL)."
+    ctx = GraphContext(derived=[(sentence, ["march.pdf", "sept.png"])], linked={"metrics": ["LDL Cholesterol"]})
+
+    class PicksDerived:
+        def verify(self, claim, evidence):
+            chunk = next(c for c in evidence if c.text == sentence)
+            return ClaimVerification(claim, "SUPPORTED", 0.9, 0.0, chunk)
+
+    verified = _chain_with_graph_ctx(monkeypatch, ctx, ["LDL fell by 26 mg/dL overall."], PicksDerived()).answer("question").claims[0]
+
+    assert verified.status == "DERIVED"
+    assert verified.source_filenames == ["march.pdf", "sept.png"]
+
+
+def test_without_graph_context_the_prompt_is_the_full_fact_dump_as_before(monkeypatch):
+    llm = RecordingLLM()
+    monkeypatch.setattr("ml.chains.qa_chain.get_patient_facts", lambda client: ["Full history line."])
+
+    _chain_with_graph_ctx(monkeypatch, None, [], FakeVerifier({}), llm).answer("What should I eat?")
+
+    assert "[patient record] Full history line." in llm.prompt
+
+
+def test_graph_retrieval_failure_degrades_to_the_base_facts(monkeypatch):
+    def boom(client, question):
+        raise RuntimeError("graph hiccup")
+
+    monkeypatch.setattr("ml.chains.qa_chain.get_patient_facts", lambda client: ["Full history line."])
+    chain = _chain_with_graph_ctx(monkeypatch, None, [], FakeVerifier({}))
+    monkeypatch.setattr("ml.chains.qa_chain.retrieve_graph_context", boom)
+
+    assert chain.answer("question").claims == []   # no exception; answered without the graph leg
