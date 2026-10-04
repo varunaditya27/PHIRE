@@ -453,6 +453,20 @@ First full live run of upload → lift → graph → timeline → chat since the
 
 ---
 
+## [0.7.4] - 2026-10-04
+
+### Batched claim verification
+
+`ClaimVerifier._predict_batch` replaces the per-chunk `_predict` loop. Pairs are tokenized once, sorted by length, and packed into batches under a token budget (`BATCH_TOKEN_BUDGET=2048`, `MAX_BATCH_PAIRS=32`); results are restored to input order. A first fixed-size-batch version was *slower* on small pools (all pairs landed in one batch and short patient facts were padded to a 512-token passage), hence the token budget.
+
+**Measured on the real BART-large-MNLI (RTX 5050, 3 claims):** results match the old loop (max probability difference 4.8e-6, identical statuses); typical turn (15 pairs) ≈ 1.0× (no gain, no loss); worst-case pool (105 pairs) ≈ 1.9–2.7× faster; peak VRAM 1.9GiB. The gain is smaller than first expected because time is dominated by the long 512-token passages (compute-bound), not per-call overhead.
+
+**Not applied (needs a decision):** fp16 inference measured a further ~2.3× on the worst case with max probability difference 0.003 and 0/315 status flips, and halves the model's VRAM, but changes numerics.
+
+Tests: pool-packing and order-restoration tests; **261 passing.** Docs updated: `BACKLOG`, `BACKEND_HANDOFF`, `CODEBASE_AUDIT`.
+
+---
+
 ## Future Versions
 
 See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.

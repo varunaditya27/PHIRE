@@ -14,8 +14,8 @@ class StubVerifier(ClaimVerifier):
     def __init__(self, predictions: dict[str, dict[str, float]]) -> None:
         self._predictions = predictions
 
-    def _predict(self, premise: str, hypothesis: str) -> dict[str, float]:
-        return self._predictions[premise]
+    def _predict_batch(self, premises: list[str], hypothesis: str) -> list[dict[str, float]]:
+        return [self._predictions[premise] for premise in premises]
 
 
 def test_verify_returns_unsupported_when_no_evidence():
@@ -79,3 +79,54 @@ def test_verify_entailing_chunk_beats_contradiction_from_unrelated_chunk():
     result = verifier.verify("claim", evidence)
     assert result.status == "SUPPORTED"
     assert result.evidence.id == "match"
+
+
+def test_pack_batches_respects_token_budget_and_pair_cap_and_covers_every_index():
+    from ml.claims import verifier as v
+
+    lengths = [10] * 5 + [100] * 4 + [512] * 6  # already ascending, as _predict_batch sorts
+    batches = ClaimVerifier._pack_batches(list(range(len(lengths))), lengths)
+
+    assert sorted(i for b in batches for i in b) == list(range(len(lengths)))  # nothing lost or duplicated
+    for b in batches:
+        assert len(b) <= v.MAX_BATCH_PAIRS
+        # longest pair is last (ascending input); pairs x longest stays in budget unless a single pair exceeds it
+        assert len(b) == 1 or len(b) * lengths[b[-1]] <= v.BATCH_TOKEN_BUDGET
+    # the shortest pairs are never padded up to a 512-token pair (the case that made naive batching slower)
+    assert all(max(lengths[i] for i in b) < 512 for b in batches if 0 in b)
+
+
+def test_predict_batch_returns_results_in_input_order_despite_length_sorting():
+    import torch
+
+    class FakeTokenizer:
+        def __call__(self, premises, hypotheses, truncation, max_length):
+            ids = [[len(p)] * len(p) for p in premises]  # row i has len(premise i) tokens, all equal to that length
+            return {"input_ids": ids, "attention_mask": [[1] * len(row) for row in ids]}
+
+        def pad(self, features, return_tensors):
+            width = max(len(row) for row in features["input_ids"])
+            ids = torch.tensor([row + [0] * (width - len(row)) for row in features["input_ids"]])
+
+            class Batch(dict):
+                def to(self, device):
+                    return self
+
+            return Batch(input_ids=ids)
+
+    class FakeModel:
+        def __call__(self, input_ids):
+            # logit 0 = the row's token value (its premise length), so each premise gets a distinct, checkable result
+            logits = torch.zeros(input_ids.shape[0], 3)
+            logits[:, 0] = input_ids[:, 0].float()
+            return type("Out", (), {"logits": logits})()
+
+    verifier = ClaimVerifier.__new__(ClaimVerifier)
+    verifier._tokenizer, verifier._model, verifier._device = FakeTokenizer(), FakeModel(), "cpu"
+    verifier._index_to_label = {0: "entailment", 1: "neutral", 2: "contradiction"}
+    premises = ["a" * 30, "b" * 3, "c" * 12, "d" * 7]  # deliberately not sorted by length
+
+    results = verifier._predict_batch(premises, "claim")
+
+    expected = [torch.softmax(torch.tensor([float(len(p)), 0.0, 0.0]), dim=-1)[0].item() for p in premises]
+    assert [round(r["entailment"], 6) for r in results] == [round(e, 6) for e in expected]

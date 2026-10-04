@@ -96,7 +96,7 @@ This comprehensive audit surfaces all implemented features, remaining functional
 - **Location**: [`docker/docker-compose.yml:L47-L104`](file:///home/varun/Projects/PHIRE/docker/docker-compose.yml#L47-L104)
 - **Issue**: `ollama` and `backend` containers do not declare `deploy.resources.reservations.devices` with GPU capabilities, forcing containerized Ollama and PyTorch to execute on CPU.
 
-### 4.5 Unbatched NLI Verification Latency Bottleneck
+### 4.5 Unbatched NLI Verification Latency Bottleneck — *batched in `[0.7.4]`; original finding below*
 - **Location**: [`ml/claims/verifier.py:L70-L86`](file:///home/varun/Projects/PHIRE/ml/claims/verifier.py#L70-L86)
 - **Issue**: `ClaimVerifier.verify()` iterates through evidence chunks sequentially, executing individual BART-large-MNLI forward passes. Evaluating 8 claims against 50 facts generates 400 sequential model calls.
 
