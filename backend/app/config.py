@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     lift_device: str = Field(default="auto", validation_alias="LIFT_DEVICE")
     phire_mock_lift: bool = Field(default=False, validation_alias="PHIRE_MOCK_LIFT")
 
+    # --- Document extractor ---
+    # "auto": lift when a CUDA GPU and lift-pdf are present, else the Ollama vision model (the CPU variant).
+    phire_extractor: str = Field(default="auto", validation_alias="PHIRE_EXTRACTOR")  # auto | lift | ollama
+    ollama_vision_model: str | None = Field(default=None, validation_alias="OLLAMA_VISION_MODEL")  # default: ollama_model
+
     # --- Neo4j (ml/graph -- Longitudinal Health Graph) ---
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"

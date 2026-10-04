@@ -70,3 +70,18 @@ def test_same_mode_twice_is_a_no_op(env):
     assert built.model.move_to.call_count == moves_after_first
     assert lift.model._release_model.call_count == 1
     unload.assert_not_called()
+
+
+def test_progress_message_about_the_gpu_is_only_sent_when_there_is_a_gpu(env):
+    events = []
+
+    with gpu_mode(LIFT, lambda stage, message: events.append(stage)):
+        pass
+    assert "gpu" in events                       # CUDA available (patched True by the fixture)
+
+    events.clear()
+    gpu_modes._current = None
+    with patch.object(gpu_modes.torch.cuda, "is_available", return_value=False):
+        with gpu_mode(LIFT, lambda stage, message: events.append(stage)):
+            pass
+    assert "gpu" not in events                   # CPU-only: no misleading "onto the GPU" message

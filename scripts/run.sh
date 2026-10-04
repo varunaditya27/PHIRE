@@ -7,7 +7,8 @@
 #   scripts/run.sh down            # stop (data volumes and data/ are kept)
 #
 # Uses the root .env explicitly (Compose would otherwise read docker/.env and ignore it) and
-# layers docker/docker-compose.gpu.yml when an NVIDIA container runtime is available.
+# layers docker/docker-compose.gpu.yml when an NVIDIA container runtime is available, otherwise
+# docker/docker-compose.cpu.yml (override with PHIRE_VARIANT=gpu|cpu).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -15,13 +16,18 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 [ -f backend/.env ] || { cp backend/.env.example backend/.env; echo "==> Created backend/.env from backend/.env.example"; }
 set -a; source .env; set +a
 
+# GPU or CPU variant: PHIRE_VARIANT=gpu|cpu forces one; otherwise an NVIDIA container runtime means GPU.
 files=(-f docker/docker-compose.yml)
-if docker info 2>/dev/null | grep -qi 'runtimes:.*nvidia'; then
+variant="${PHIRE_VARIANT:-auto}"
+if [ "$variant" = "auto" ]; then
+  if docker info 2>/dev/null | grep -qi 'runtimes:.*nvidia'; then variant=gpu; else variant=cpu; fi
+fi
+if [ "$variant" = "gpu" ]; then
   files+=(-f docker/docker-compose.gpu.yml)
-  echo "==> NVIDIA runtime detected: GPU enabled for the backend (and bundled Ollama, if used)"
+  echo "==> GPU variant: NVIDIA runtime in use for the backend (lift extraction) and any bundled Ollama"
 else
-  echo "==> No NVIDIA container runtime: running without a GPU (chat is slow; document extraction needs a GPU)." >&2
-  echo "    Install the NVIDIA Container Toolkit to enable it -- see docker/docker-compose.gpu.yml." >&2
+  files+=(-f docker/docker-compose.cpu.yml)
+  echo "==> CPU variant: CPU-only PyTorch, documents read by an Ollama vision model (slower; see docs/CPU_SETUP.md)"
 fi
 
 # The backend uses the Ollama already running on the host. Only fall back to the bundled container

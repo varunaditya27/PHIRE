@@ -88,9 +88,35 @@ def get_lift_extractor():
     )
 
 
+def _lift_usable() -> bool:
+    """Lift needs the lift-pdf package and a CUDA GPU (it cannot realistically run on a CPU)."""
+    import importlib.util
+
+    import torch
+
+    return importlib.util.find_spec("lift") is not None and torch.cuda.is_available()
+
+
+@lru_cache
+def get_ollama_extractor():
+    from ml.rag.ingest.ollama_extractor import OllamaVisionExtractor
+
+    settings = get_settings()
+    return OllamaVisionExtractor(model=settings.ollama_vision_model or settings.ollama_model, host=settings.ollama_host)
+
+
 def get_extractor():
-    """The document extractor in use (lift today; see the CPU variant for the alternative)."""
-    return get_lift_extractor()
+    """The document extractor for this machine: lift on a CUDA GPU, otherwise the Ollama vision model.
+
+    PHIRE_EXTRACTOR=lift|ollama forces one (e.g. ollama on a GPU box that wants its VRAM for chat).
+    "lift" with no GPU or no lift-pdf installed fails loudly at first use rather than silently degrading.
+    """
+    choice = get_settings().phire_extractor.lower()
+    if choice == "lift" or (choice == "auto" and _lift_usable()):
+        return get_lift_extractor()
+    if choice not in ("auto", "ollama"):
+        raise ValueError(f"PHIRE_EXTRACTOR must be auto, lift or ollama, got {choice!r}")
+    return get_ollama_extractor()
 
 
 @lru_cache
@@ -113,7 +139,7 @@ def get_ollama_client():
     from ml.llm.ollama_client import OllamaClient
 
     settings = get_settings()
-    return OllamaClient(model=settings.ollama_model, host=settings.ollama_host)
+    return OllamaClient(model=settings.ollama_model, host=settings.ollama_host, timeout=settings.ollama_timeout_seconds)
 
 
 @lru_cache

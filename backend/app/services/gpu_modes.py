@@ -62,7 +62,7 @@ def _switch_to(mode: str, on_progress: Callable[[str, str], None] | None = None)
     global _current
     if mode == _current:
         return
-    if on_progress:
+    if on_progress and torch.cuda.is_available():  # on a CPU-only machine nothing is moved, so say nothing
         on_progress("gpu", f"Loading {'vision' if mode == LIFT else 'chat'} models onto the GPU")
     if mode == LIFT:
         _unload_ollama_model()

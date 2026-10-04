@@ -19,8 +19,19 @@ $PYTHON_BIN -m venv backend/.venv
 backend/.venv/bin/pip install --upgrade pip -q
 backend/.venv/bin/pip install -q -r backend/requirements.txt
 
-echo "==> ML: requirements (into the same venv, backend calls into ml/)"
-backend/.venv/bin/pip install -q -r ml/requirements.txt
+# GPU machines get lift (needs Python >= 3.12 and CUDA); everything else gets CPU-only PyTorch and the Ollama
+# vision extractor. Force with PHIRE_VARIANT=gpu|cpu.
+variant="${PHIRE_VARIANT:-auto}"
+if [ "$variant" = "auto" ]; then
+  if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null; then variant=gpu; else variant=cpu; fi
+fi
+echo "==> ML: requirements, $variant variant (into the same venv, backend calls into ml/)"
+if [ "$variant" = "cpu" ]; then
+  backend/.venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+  backend/.venv/bin/pip install -q -r ml/requirements.txt
+else
+  backend/.venv/bin/pip install -q -r ml/requirements.txt -r ml/requirements-lift.txt
+fi
 
 echo "==> Frontend: npm install"
 (cd frontend && npm install)

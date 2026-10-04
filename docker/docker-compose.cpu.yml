@@ -1,0 +1,23 @@
+# CPU-only override: for laptops/servers without an NVIDIA GPU. Layered on docker-compose.yml by scripts/run.sh
+# when no NVIDIA container runtime is found (or PHIRE_VARIANT=cpu):
+#   docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.cpu.yml up -d --build
+#
+# Differences from the GPU variant: the image is built with CPU-only PyTorch and without lift (VARIANT=cpu),
+# and document extraction goes through an Ollama vision model (PHIRE_EXTRACTOR=ollama; medgemma:4b by default,
+# the same model that answers chat, so there is nothing extra to download). Everything is slower on a CPU --
+# see docs/CPU_SETUP.md for hardware guidance and measured timings. Generation timeouts are raised accordingly.
+
+services:
+  backend:
+    image: phire-backend-cpu
+    build:
+      args:
+        VARIANT: cpu
+    environment:
+      PHIRE_EXTRACTOR: ollama
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-600}
+  ingest:
+    image: phire-backend-cpu
+    build:
+      args:
+        VARIANT: cpu
