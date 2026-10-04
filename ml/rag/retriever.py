@@ -103,6 +103,10 @@ class HybridRetriever:
             self._chunks[cid] = Chunk(id=cid, text=text, metadata=dict(metadata))
         self._rebuild_bm25()
 
+    def chunks(self) -> list[Chunk]:
+        """Every chunk currently indexed (a snapshot; for maintenance tools such as reformat_corpus)."""
+        return list(self._chunks.values())
+
     def move_to(self, device: str) -> None:
         """Move the embedding encoders to `device` (see backend gpu_modes.py)."""
         self._embedder.move_to(device)
