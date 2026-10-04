@@ -25,7 +25,7 @@ This comprehensive audit surfaces all implemented features, remaining functional
 |---|---|---|
 | **Frontend** | Patient Dashboard | Multi-series Recharts health timeline and recent clinical observation cards ([`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx)). |
 | **Frontend** | Medical Chat UI | Conversational interface with per-claim expandable NLI verification badges ([`frontend/app/chat/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/chat/page.tsx)). |
-| **Frontend** | Document Ingestion UI | Drag-and-drop PDF/image uploader with polling ingestion status ([`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx)). |
+| **Frontend** | Document Ingestion UI | Drag-and-drop PDF/image uploader with live SSE ingestion progress (stage checklist) ([`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx)). |
 | **Frontend** | Search & Claim Explorer | Hybrid search explorer and direct single-claim NLI verifier ([`frontend/app/search/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/search/page.tsx)). |
 | **Backend** | Chat & Reverse-RAG QA | Ingestion, retrieval, generation, atomic claim extraction, NLI verification, and confidence filtering ([`backend/app/api/router_chat.py`](file:///home/varun/Projects/PHIRE/backend/app/api/router_chat.py)). |
 | **Backend** | Document Ingestion Engine | Multipart file streaming, 25MB validation, background worker, and Chroma/Neo4j index rollback on failure ([`backend/app/api/router_documents.py`](file:///home/varun/Projects/PHIRE/backend/app/api/router_documents.py), [`backend/app/services/document_processor.py`](file:///home/varun/Projects/PHIRE/backend/app/services/document_processor.py)). |
@@ -111,8 +111,11 @@ This comprehensive audit surfaces all implemented features, remaining functional
 ### 5.1 Host-Networking for Air-Gap Privacy Compliance
 `ml.local_only.require_localhost()` strictly validates that outbound service hostnames resolve to `{"localhost", "127.0.0.1", "::1"}` to eliminate DNS rebinding and cloud data egress. To satisfy this inside Docker without custom code exceptions, `backend` and `nginx` run with `network_mode: host` in `docker-compose.yml`.
 
-### 5.2 GPU Serialization Lock (`GPU_LOCK`)
-To prevent CUDA Out-Of-Memory (OOM) crashes on consumer GPUs (e.g. 8GB VRAM) when chat generation (`medgemma:4b` + `facebook/bart-large-mnli`) and document ingestion (`datalab-to/lift` 4-bit NF4 VLM + `MedCPT`) run concurrently, a process-wide `GPU_LOCK` in [`backend/app/services/ml_singletons.py`](file:///home/varun/Projects/PHIRE/backend/app/services/ml_singletons.py) serializes all GPU operations.
+### 5.2 GPU Residency Modes (`gpu_mode`, wrapping `GPU_LOCK`)
+Quantized `datalab-to/lift` (4-bit NF4, ~6.5GiB peak) cannot share an 8GB GPU with the chat-time models (MedCPT ×2, reranker, BART-MNLI, Ollama `medgemma:4b`, ~6.9GB). [`backend/app/services/gpu_modes.py`](file:///home/varun/Projects/PHIRE/backend/app/services/gpu_modes.py)'s `gpu_mode(LIFT|CHAT)` holds the process-wide `GPU_LOCK` from [`ml_singletons.py`](file:///home/varun/Projects/PHIRE/backend/app/services/ml_singletons.py) and, only when the mode changes, evicts the other group (in-process models parked in CPU RAM via `move_to`, Ollama unloaded via its API). Same-mode requests are no-ops. Details: `docs/BACKEND_HANDOFF.md` §8.
+
+### 5.2b SSE progress
+`POST /api/chat/stream` and `GET /api/documents/{id}/events` stream stage-level progress (frame formats in `docs/API_REFERENCE.md`). Document events come from the in-memory `app/services/progress.py` channel (single-process); chat events from `QAChain.answer(on_progress=...)` via a queue from a worker thread.
 
 ### 5.3 Tripartite Data Storage Separation
 1. **PostgreSQL**: Upload metadata (`documents`), conversations (`chat_messages`), queryable claim audit rows (`claims`), and access logs (`audit_log`).

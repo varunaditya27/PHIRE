@@ -29,74 +29,78 @@ class LiftExtractor:
     ) -> None:
         self.model_id = model_id or DEFAULT_MODEL_ID
         self.device = (device or os.environ.get("LIFT_DEVICE", "auto")).lower()
-        self.mock = (
-            mock
-            if mock is not None
-            else (os.environ.get("PHIRE_MOCK_LIFT", "").lower() in ("1", "true", "yes"))
-        )
+        self._mock = mock
         self._model = None
+
+    @property
+    def mock(self) -> bool:
+        """Explicit constructor value wins; otherwise PHIRE_MOCK_LIFT, read at call time.
+
+        Read lazily because patient_documents.py builds a module-level default
+        extractor at import, before a caller or test has set the env var.
+        """
+        if self._mock is not None:
+            return self._mock
+        return os.environ.get("PHIRE_MOCK_LIFT", "").lower() in ("1", "true", "yes")
 
     def supports(self, file_path: Path) -> bool:
         return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
 
     def _get_model(self):
-        """Lazy loader with device detection and quantization setup."""
+        """Load lift once; on CUDA, quantize to 4-bit NF4 so the 9.7B model fits 8GB VRAM.
+
+        lift's InferenceManager only accepts `method` -- it ignores or rejects
+        any quantization/device kwargs and always loads bf16 (~18GB). So the
+        quantized model is built here with transformers and injected into an
+        InferenceManager. No silent fallback: if the 4-bit load fails, raise
+        rather than quietly loading bf16 and spilling the model into CPU RAM.
+        """
         if self._model is not None:
             return self._model
 
         import torch
 
-        # Import lift's InferenceManager
         try:
             from lift.model import InferenceManager
-        except ImportError:
+            from lift.settings import settings as lift_settings
+        except ImportError as exc:
             raise ImportError(
                 "lift-pdf package not installed. Install with: pip install 'lift-pdf[hf]'"
-            )
+            ) from exc
 
-        if self.device == "cpu":
-            # Force CPU mode: standard precision, device=cpu; strictly no BitsAndBytesConfig
-            try:
-                self._model = InferenceManager(
-                    method="hf",
-                    model_name=self.model_id,
-                    device="cpu",
-                    torch_dtype=torch.float32,
-                )
-            except TypeError:
-                self._model = InferenceManager(method="hf")
-        elif self.device in ("auto", "cuda") and torch.cuda.is_available():
-            # In CUDA mode: 4-bit NF4 quantization via BitsAndBytesConfig
-            try:
-                from transformers import BitsAndBytesConfig
+        lift_settings.MODEL_CHECKPOINT = self.model_id
+        use_cuda = self.device in ("auto", "cuda") and torch.cuda.is_available()
 
-                quantization_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
-                    bnb_4bit_quant_type="nf4",
-                )
-                try:
-                    self._model = InferenceManager(
-                        method="hf",
-                        model_name=self.model_id,
-                        quantization_config=quantization_config,
-                    )
-                except TypeError:
-                    self._model = InferenceManager(method="hf")
-            except (ImportError, Exception):
-                self._model = InferenceManager(method="hf")
-        else:
-            # In CPU mode: standard precision, device=cpu; strictly no BitsAndBytesConfig
-            try:
-                self._model = InferenceManager(
-                    method="hf",
-                    model_name=self.model_id,
-                    device="cpu",
-                    torch_dtype=torch.float32,
-                )
-            except TypeError:
-                self._model = InferenceManager(method="hf")
+        if not use_cuda:
+            lift_settings.TORCH_DEVICE = "cpu"
+            self._model = InferenceManager(method="hf")
+            return self._model
 
+        from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
+
+        # Vision tower (0.46B) stays bf16: quantizing it hurts OCR fidelity for
+        # little VRAM gain. The language model and lm_head are quantized.
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            llm_int8_skip_modules=["visual"],
+        )
+        model = AutoModelForImageTextToText.from_pretrained(
+            self.model_id,
+            quantization_config=quantization_config,
+            dtype=torch.bfloat16,
+            device_map={"": 0},
+        ).eval()
+        processor = AutoProcessor.from_pretrained(self.model_id)
+        processor.tokenizer.padding_side = "left"
+        model.processor = processor
+
+        # "vllm" skips lift's own load_model(); we then swap in the quantized one.
+        manager = InferenceManager(method="vllm")
+        manager.method, manager.model = "hf", model
+        self._model = manager
         return self._model
 
     def extract(self, file_path: Path) -> dict[str, Any]:
@@ -123,11 +127,26 @@ class LiftExtractor:
             # Fallback or error logging
             raise RuntimeError(f"Lift extraction failed for {file_path}: {exc}") from exc
         finally:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            self._release_model()
 
         return validate_lift_payload(raw_output)
+
+    def _release_model(self) -> None:
+        """Free lift's VRAM after each document.
+
+        Quantized lift peaks at ~6.5GiB; the backend also keeps MedCPT, the
+        reranker and BART-MNLI resident (plus Ollama's model), so holding lift
+        permanently on an 8GB GPU OOMs chat. Uploads are rare, so we pay the
+        ~1 min reload instead.
+        """
+        import gc
+
+        import torch
+
+        self._model = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _generate_mock_payload(self, file_path: Path) -> dict[str, Any]:
         """Generate deterministic mock payload for fast unit test execution."""

@@ -8,10 +8,13 @@ immediately with status "uploaded"; poll GET /api/documents/{id} for
 "processed"/"failed".
 """
 
+import json
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -20,6 +23,9 @@ from app.config import get_settings
 from app.database.connection import get_db
 from app.database.schemas import Document
 from app.models.document import DocumentRead, DocumentUploadResponse
+from app.services import progress
+from app.services.gpu_modes import CHAT, gpu_mode
+from app.services.ml_singletons import get_retriever, new_graph_client
 from app.services.document_processor import process_document
 from app.utils.constants import SUPPORTED_FILE_TYPES, DocumentStatus
 from app.utils.validators import read_upload_within_limit, validate_upload
@@ -75,6 +81,8 @@ async def upload_document(
 
     document = await run_in_threadpool(_write_and_record)
 
+    progress.reset(str(document_id))
+    progress.publish(str(document_id), "queued", "Upload received, waiting to start")
     background_tasks.add_task(_run_processing, document_id)
 
     return DocumentUploadResponse(id=document.id, filename=document.filename, status=DocumentStatus.UPLOADED)
@@ -108,6 +116,8 @@ def reprocess_document(
         raise HTTPException(status_code=409, detail="Document is already being processed.")
 
     document = db.get(Document, document_id)
+    progress.reset(str(document_id))
+    progress.publish(str(document_id), "queued", "Reprocessing, waiting to start")
     background_tasks.add_task(_run_processing, document_id)
     return DocumentUploadResponse(id=document.id, filename=document.filename, status=DocumentStatus.PROCESSING)
 
@@ -118,3 +128,68 @@ def get_document(document_id: uuid.UUID, db: Session = Depends(get_db)) -> Docum
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+def _sse(event: str, data: dict) -> str:
+    """One Server-Sent Event frame."""
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.get("/{document_id}/events")
+def document_events(document_id: uuid.UUID, db: Session = Depends(get_db)) -> StreamingResponse:
+    """SSE stream of this document's ingestion stages, ending with processed/failed.
+
+    A document with no in-memory history (e.g. a backend restart wiped it)
+    gets one event reflecting its stored status and the stream closes --
+    nothing will ever publish for it, so waiting would just hang.
+    """
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    key = str(document_id)
+    stored_status, stored_error = document.status, document.error_message
+
+    def stream() -> Iterator[str]:
+        if not progress.has_history(key):
+            yield _sse("progress", {"stage": stored_status, "message": stored_error or stored_status.capitalize()})
+            return
+        for event in progress.subscribe(key):
+            yield ": keep-alive\n\n" if event is None else _sse("progress", event)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.delete("/{document_id}", status_code=204)
+def delete_document(document_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
+    """Remove a document everywhere it was written: Chroma chunks, Neo4j facts,
+    the stored file, and its Postgres row.
+
+    Refused with 409 while it is still processing -- the background worker
+    would otherwise write chunks/facts for a document that no longer exists.
+    """
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if document.status == DocumentStatus.PROCESSING.value:
+        raise HTTPException(status_code=409, detail="Document is still processing; try again when it finishes.")
+
+    # Errors propagate (500, row kept) instead of being swallowed like the
+    # best-effort rollback after a failed ingestion: a "deleted" document
+    # whose facts still answer chat would be a silent privacy failure, and
+    # keeping the row lets the user retry. The retriever needs the CHAT-group
+    # GPU models, hence gpu_mode.
+    from ml.graph.deletion import delete_document_facts
+
+    with gpu_mode(CHAT):
+        get_retriever().delete_by_document_id(str(document.id))
+    with new_graph_client() as client:
+        delete_document_facts(client, str(document.id))
+    Path(document.storage_path).unlink(missing_ok=True)
+    db.delete(document)
+    db.commit()
+    progress.forget(str(document_id))
+    return Response(status_code=204)

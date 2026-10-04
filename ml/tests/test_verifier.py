@@ -65,3 +65,17 @@ def test_verify_picks_most_informative_chunk_over_a_neutral_one():
 
     assert result.evidence.id == "entails"
     assert result.status == "SUPPORTED"
+
+
+def test_verify_entailing_chunk_beats_contradiction_from_unrelated_chunk():
+    # Regression: same-template sentences about a different metric (HDL vs an
+    # LDL claim) score ~1.0 "contradiction" under NLI and used to outrank the
+    # true 0.99-entailing match, flipping a correct claim to CONFLICTING.
+    evidence = [Chunk(id="unrelated", text="unrelated text", metadata={}), Chunk(id="match", text="matching text", metadata={})]
+    verifier = StubVerifier({
+        "unrelated text": {"entailment": 0.0, "neutral": 0.0, "contradiction": 1.0},
+        "matching text": {"entailment": 0.99, "neutral": 0.01, "contradiction": 0.0},
+    })
+    result = verifier.verify("claim", evidence)
+    assert result.status == "SUPPORTED"
+    assert result.evidence.id == "match"

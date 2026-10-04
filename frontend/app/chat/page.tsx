@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { api, ChatResponse, Claim } from "@/lib/api";
+import { api, ChatResponse, Claim, ProgressEvent } from "@/lib/api";
+import { ProgressSteps } from "@/components/progress-steps";
 import { Send, Bot, User, ShieldCheck, AlertTriangle, HelpCircle, CheckCircle2, ChevronDown, ChevronRight, FileCheck, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [steps, setSteps] = useState<ProgressEvent[]>([]);
   const [expandedClaims, setExpandedClaims] = useState<Record<string, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -33,7 +35,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, loading]);
+  }, [messages, loading, steps]);
 
   const toggleClaimExpansion = (msgId: string) => {
     setExpandedClaims((prev) => ({
@@ -55,10 +57,11 @@ export default function ChatPage() {
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setSteps([]);
     setLoading(true);
 
     try {
-      const response: ChatResponse = await api.chat.send(userMessage.content);
+      const response: ChatResponse = await api.chat.stream(userMessage.content, (e) => setSteps((prev) => [...prev, e]));
       const assistantMessage: Message = {
         id: response.id || Date.now().toString(),
         role: "assistant",
@@ -233,13 +236,19 @@ export default function ChatPage() {
         ))}
 
         {loading && (
-          <div className="flex gap-4 justify-start items-center animate-pulse">
+          <div className="flex gap-4 justify-start items-center">
             <div className="w-9 h-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 text-primary">
               <Bot className="w-5 h-5" />
             </div>
-            <div className="bg-card border border-border rounded-2xl rounded-bl-none px-5 py-4 flex items-center space-x-3 text-muted-foreground text-sm">
-              <Loader2 className="w-4 h-4 animate-spin text-primary" />
-              <span>Analyzing medical records and verifying claims...</span>
+            <div className="bg-card border border-border rounded-2xl rounded-bl-none px-5 py-4 text-muted-foreground text-sm">
+              {steps.length > 0 ? (
+                <ProgressSteps steps={steps} />
+              ) : (
+                <span className="flex items-center gap-3">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  Connecting to PHIRE...
+                </span>
+              )}
             </div>
           </div>
         )}

@@ -385,6 +385,45 @@ below.
 
 ---
 
+## [0.7.0] - 2026-10-04
+
+### Working end-to-end on an 8GB GPU: real 4-bit lift, LIFT/CHAT GPU modes, SSE progress
+
+First full live run of upload → lift → graph → timeline → chat since the `[0.6.0]` lift merge (previously only unit-tested in mock mode).
+
+**Fixed**
+- **Lift was never actually quantized.** `lift.model.InferenceManager.__init__` accepts only `method`; `LiftExtractor` passed `model_name`/`quantization_config`/`device`, got `TypeError`, and its `except TypeError` silently fell back to `InferenceManager(method="hf")` — an unquantized 18GB bf16 load that spilled into CPU RAM. `_get_model()` now builds the 4-bit NF4 model itself (vision tower kept bf16, `device_map={"": 0}`) and injects it into an `InferenceManager`; no silent fallback. Measured: 56s load, 6GiB resident, 6.5GiB peak, 37s to extract; all values of a sample lab PDF correct.
+- **`ClaimVerifier` flipped correct claims to `CONFLICTING`.** NLI gave ~1.0 "contradiction" between same-template sentences about different facts (HDL fact vs an LDL claim) and the old "strongest signal in either direction" pick let it outrank the true 0.99 match, dropping the claim (and the actual value) from the answer. A clearly entailing chunk now wins. Trade-off documented in `docs/ML_HANDOFF_FOR_ANIKA.md` §5.
+- **`PHIRE_MOCK_LIFT` was read once at import** (module-level default extractor), so setting it later had no effect. `LiftExtractor.mock` is now resolved at call time.
+- Lift's weights are freed after every document (`_release_model`).
+- Double-processing on upload: the documents page no longer calls `/process` after `/upload` (which already queues processing).
+
+**Added**
+- `backend/app/services/gpu_modes.py`: `gpu_mode(LIFT|CHAT, on_progress)` replaces the bare `GPU_LOCK` at all call sites. Lift and the chat group (MedCPT ×2, reranker, BART-MNLI, Ollama's model) are mutually exclusive on the card; switching evicts the other group, staying put is a no-op (warm chat 36s → 5.6s). `move_to(device)` added to `EmbeddingModel`, `Reranker`, `ClaimVerifier`, `HybridRetriever`; devices are now per-instance, not module-level `_DEVICE`.
+- **SSE progress.** `POST /api/chat/stream` (events `progress`…`result`|`error`) and `GET /api/documents/{id}/events` (replay-then-live, keep-alive, closes on `processed`/`failed`), via `backend/app/services/progress.py` and `router_chat.run_chat()` (shared by both chat endpoints). `QAChain.answer(on_progress=...)` reports `graph/retrieve/generate/extract/verify`. Additive — `POST /api/chat` is unchanged.
+- Frontend: `lib/sse.ts` (fetch-based SSE reader, works for POST), `api.chat.stream` / `api.documents.watch`, `components/progress-steps.tsx` (live step checklist with per-step timer) used by `/chat` and `/documents`; the documents page's 2.5s polling is removed.
+- Tests: `ml/tests/conftest.py` (mock lift by default), `test_gpu_modes.py`, `test_progress.py`, verifier regression test, `on_progress` stage-order test, rewritten `_get_model` tests. **220 passing.**
+
+**Docs updated:** `README.md`, `GET_STARTED.md`, `REPO_STRUCTURE.md`, `ml/README.md`, `backend/README.md`, `docs/API_REFERENCE.md`, `docs/BACKEND_HANDOFF.md` (§8), `docs/FRONTEND_HANDOFF.md`, `docs/ML_HANDOFF_FOR_ANIKA.md`, `docs/BACKLOG.md`, `docs/RESEARCH_LOG.md`.
+
+---
+
+## [0.7.1] - 2026-10-04
+
+### Fixes found by the live end-to-end review
+
+**Fixed**
+- **Search relevance showed `0.0%`.** `EvidenceCitation.score` was never set. `GET /api/search/evidence` and `POST /api/evidence/retrieve` now go through `app/services/evidence_search.py`: wide retrieval → the same rerank chat uses → `score` = MedCPT cross-encoder relevance (new public `Reranker.score()`). **Behavior change:** results are now reranked (previously raw fused-rank order), so ordering can differ from before.
+- **Users saw `<uuid>.pdf` as a claim's source** (also embedded in chunk text as "Source: …"). `build_chunks(..., filename=)` now carries the original upload name; `document_processor` passes `document.filename`. Previously ingested documents keep the old name until re-uploaded.
+
+**Added**
+- `DELETE /api/documents/{id}` (204/404/409-while-processing): removes Chroma chunks, Neo4j facts, the stored file and the Postgres row; errors propagate rather than being swallowed. Documents page gets a delete button (`api.documents.remove`). Verified live: after deleting both test documents Chroma returned to its 623 reference chunks and the graph to 0 observations.
+- Tests: `test_evidence_search.py`, filename-override test; **222 passing.**
+
+**Docs updated:** `docs/API_REFERENCE.md`, `docs/BACKLOG.md`, `docs/FRONTEND_HANDOFF.md`, `backend/README.md`, `REPO_STRUCTURE.md`.
+
+---
+
 ## Future Versions
 
 See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.

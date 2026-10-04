@@ -77,3 +77,12 @@ def test_build_chunks_with_text_backward_compatibility():
 def test_build_chunks_raises_on_empty_data():
     with pytest.raises(ValueError, match="No content extracted"):
         build_chunks(FIXTURE_PATH, data={})
+
+
+def test_build_chunks_filename_override_replaces_on_disk_name_everywhere():
+    # Backend stores uploads as <uuid>.pdf; users must see the name they uploaded,
+    # in both metadata and the synthesized chunk text ("Source: ...").
+    chunks = build_chunks(FIXTURE_PATH, filename="my_labs.pdf")
+
+    assert all(c.metadata["filename"] == "my_labs.pdf" for c in chunks)
+    assert all("sample_lab_report" not in c.text for c in chunks)

@@ -16,6 +16,7 @@ the cost of prose that reads as a list of statements rather than a
 flowing answer. Revisit once this is validated end-to-end.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ml.claims.confidence import compute_confidence
@@ -98,13 +99,25 @@ class QAChain:
         self._llm = llm_client or OllamaClient()
         self._graph_client = graph_client or GraphClient()
 
-    def answer(self, question: str, observations: list[str] | None = None, top_k: int = 5) -> ChatResponse:
+    def answer(
+        self,
+        question: str,
+        observations: list[str] | None = None,
+        top_k: int = 5,
+        on_progress: Callable[[str, str], None] | None = None,
+    ) -> ChatResponse:
         """Run the full retrieve -> generate -> verify -> abstain pipeline for one question.
 
         observations defaults to the patient's current graph state
         (ml/graph/patient_context.py) -- callers only need to pass it
         explicitly to override that default (e.g. tests).
+
+        on_progress(stage, message), if given, is called as each stage
+        starts so a caller (the backend's SSE endpoint) can show what the
+        slow, otherwise-silent pipeline is doing; it never affects results.
         """
+        progress = on_progress or (lambda stage, message: None)
+        progress("graph", "Reading your health records")
         history_facts, current_facts, trend_facts = self._graph_facts(need_history=observations is None)
         if observations is None:
             observations = history_facts + trend_facts
@@ -118,10 +131,12 @@ class QAChain:
         # the candidate pool in the first place. Verified live: a patient
         # document's own lab value ranked outside a top_k*2=10 pool but
         # inside a wider one.
+        progress("retrieve", "Searching medical evidence")
         candidates = self._retriever.retrieve(question, top_k=max(20, top_k * 4))
         evidence = self._reranker.rerank(question, candidates, top_k=top_k)
 
         prompt = build_chat_prompt(question, evidence, observations)
+        progress("generate", "Drafting an answer with the local model")
         draft_answer = self._llm.generate(prompt)
 
         # A claim restating a patient fact ("your LDL was 162 mg/dL") needs
@@ -147,7 +162,12 @@ class QAChain:
         derived_evidence = self._facts_to_chunks(trend_facts, source="patient_derived")
         verification_pool = patient_evidence + derived_evidence + evidence
 
-        verified = [self._verify_claim(claim, verification_pool) for claim in self._extractor.extract(draft_answer)]
+        progress("extract", "Splitting the draft into checkable claims")
+        claims = self._extractor.extract(draft_answer)
+        verified = []
+        for i, claim in enumerate(claims, start=1):
+            progress("verify", f"Verifying claim {i} of {len(claims)} against your records and evidence")
+            verified.append(self._verify_claim(claim, verification_pool))
         supported = [c for c in verified if c.status in ("SUPPORTED", "DERIVED") and c.confidence >= ABSTENTION_THRESHOLD]
         answer = " ".join(c.claim for c in supported) if supported else NO_EVIDENCE_MESSAGE
         return ChatResponse(answer=answer, claims=verified)

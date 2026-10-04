@@ -47,7 +47,9 @@ from app.config import get_settings
 # four) -- all of which run on worker threads (FastAPI's threadpool for
 # sync routes, BackgroundTasks' worker thread for _run_processing), so
 # blocking here doesn't block the event loop, only serializes these call
-# sites against each other.
+# sites against each other. Call sites now enter it through
+# gpu_modes.gpu_mode(), which also swaps the lift group and the chat-model
+# group on/off the GPU (they cannot coexist on 8GB) -- see that module.
 GPU_LOCK = threading.Lock()
 
 

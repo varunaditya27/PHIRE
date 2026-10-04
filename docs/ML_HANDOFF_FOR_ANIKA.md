@@ -34,6 +34,9 @@ chain = QAChain()  # loads several models — construct once, reuse, not per-req
 response = chain.answer("what was my LDL cholesterol result?")
 
 response.answer   # str — the final answer, built only from verified claims
+# chain.answer(question, on_progress=cb) — optional cb(stage, message) fired as each
+# stage starts (graph, retrieve, generate, extract, verify×n); the backend's SSE chat
+# endpoint uses it. Never affects results.
 response.claims   # list[VerifiedClaim] — full audit trail, including dropped claims
 ```
 
@@ -120,7 +123,9 @@ Production model requirement:
 |---|---|---|
 | Chat generation | `medgemma:4b` | `OLLAMA_MODEL` |
 
-Visual document extraction uses `datalab-to/lift` (9.7B VLM), loaded in-process via Hugging Face with 4-bit NF4 quantization on CUDA and CPU fallback (`LIFT_MODEL`, `LIFT_DEVICE`, `PHIRE_MOCK_LIFT`).
+Visual document extraction uses `datalab-to/lift` (9.7B VLM, 18GB in bf16), loaded in-process via Hugging Face with **4-bit NF4 quantization on CUDA** and a CPU fallback (`LIFT_MODEL`, `LIFT_DEVICE`, `PHIRE_MOCK_LIFT`). Measured on the 8GB RTX 5050: ~56s to load, ~6GiB resident, 6.5GiB peak, ~37s to extract a one-page lab report, all values correct.
+
+**How quantization is actually applied (important):** lift's `InferenceManager.__init__` accepts *only* `method` — it silently ignores/rejects `quantization_config`/`device` kwargs and always loads bf16. `LiftExtractor._get_model()` therefore builds the NF4 model itself with `AutoModelForImageTextToText.from_pretrained(..., quantization_config=BitsAndBytesConfig(load_in_4bit, nf4, double-quant, bf16 compute, llm_int8_skip_modules=["visual"]), device_map={"": 0})`, then injects it into an `InferenceManager(method="vllm")` (which skips lift's own loader) by setting `.method="hf"` and `.model`. An earlier version passed the kwargs to `InferenceManager` inside `try/except TypeError` and silently fell back to the unquantized bf16 load, which spilled the model into CPU RAM; there is deliberately **no such fallback now** — a failed 4-bit load raises. The vision tower stays bf16. `PHIRE_MOCK_LIFT` is read at call time, and `LiftExtractor` frees its weights after every document (`_release_model`).
 
 
 All benchmarked, not guessed — see `ml/claims/experiments/RESULTS.md`
@@ -240,17 +245,30 @@ in that case, not a wrong guess. Check for `None` before using it.
 
 ## 5. Known limitations / things that will bite you if assumed away
 
-1. **GPU memory concurrency.** On an 8GB GPU, Lift VLM (loaded
-   with 4-bit NF4 quantization) shares VRAM with the MedCPT embedding,
-   reranker, and BART claim verifier. Backend document processing wraps
-   Lift extraction in `GPU_LOCK` (`backend/app/services/document_processor.py`)
-   to prevent simultaneous GPU operations from triggering out-of-memory errors.
-   On CPU/non-CUDA setups, Lift runs in full float32 without `BitsAndBytesConfig`.
-2. **DERIVED and INFERRED claim statuses are not implemented.** Only
-   `SUPPORTED`/`CONFLICTING`/`UNCERTAIN`/`UNSUPPORTED` exist. A claim that
-   requires computing something from raw values, or multi-hop reasoning,
-   currently just falls into `UNCERTAIN` rather than being specially
-   handled — documented gap in `ml/claims/verifier.py`, not a bug.
+1. **GPU memory: two mutually exclusive modes.** On an 8GB GPU, quantized
+   Lift (6.5GiB peak) cannot coexist with MedCPT ×2, the reranker, BART and
+   Ollama's chat model (~6.9GB together). The backend's
+   `app/services/gpu_modes.py` keeps either the `LIFT` group or the `CHAT`
+   group resident and swaps on change (see `docs/BACKEND_HANDOFF.md` §8).
+   To support this, `EmbeddingModel`, `Reranker`, `ClaimVerifier` and
+   `HybridRetriever` each expose `move_to(device)` (weights parked in CPU RAM,
+   ~1s to restore) and track their device per instance instead of the old
+   module-level `_DEVICE`. On CPU/non-CUDA setups Lift loads through lift's
+   default loader with `TORCH_DEVICE="cpu"`, no quantization.
+2. **INFERRED is not implemented; DERIVED is, one layer up.**
+   `ClaimVerifier` itself only returns `SUPPORTED`/`CONFLICTING`/`UNCERTAIN`/
+   `UNSUPPORTED`; `QAChain` relabels a SUPPORTED match against a precomputed
+   graph trend sentence as `DERIVED`. A claim needing multi-hop reasoning
+   still falls into `UNCERTAIN` — documented gap, not a bug.
+   **Verifier selection rule (changed 2026-10-04):** if any evidence chunk
+   entails the claim (≥ `ENTAILMENT_THRESHOLD`), the strongest entailing
+   chunk decides the verdict; only otherwise does the chunk with the
+   strongest entailment-or-contradiction signal decide. Reason: BART-MNLI
+   gives ~1.0 "contradiction" between same-template sentences about
+   *different* facts (an HDL value vs an LDL claim), which used to outrank
+   the true 0.99-entailing fact and flip correct patient-record claims to
+   `CONFLICTING`. Trade-off: a claim that is entailed by one chunk but
+   genuinely contradicted by another now reports SUPPORTED.
 3. **Scanned PDFs and image-based documents are fully supported** —
    `datalab-to/lift` visual extraction natively processes scanned PDFs,
    photos, and digital PDFs alike into unified structured schema output.

@@ -8,8 +8,9 @@ this doc covers only `ml/`.
 **Status**: Core pipeline implemented and live-tested end-to-end (retrieval
 → generation → claim extraction → NLI verification → confidence scoring →
 abstention, grounded in real patient facts from Neo4j). Backend integration
-(`backend/` FastAPI wiring with `GPU_LOCK` and `ml_singletons`) is fully
-implemented and tested. Unified visual extraction via `datalab-to/lift` 9.7B VLM
+(`backend/` FastAPI wiring with `ml_singletons` and the LIFT/CHAT GPU modes in
+`gpu_modes.py`) is fully implemented and tested, including live-run on an 8GB GPU
+(upload → lift → graph → chat, with SSE progress). Unified visual extraction via `datalab-to/lift` 9.7B VLM
 replaces the previous multi-pass OCR, table parsing, and prose extraction pipeline.
 See [Features & Status](#-features--status) below.
 
@@ -29,8 +30,9 @@ See [Features & Status](#-features--status) below.
   visual document extraction — read back into chat as current-state facts
   and precomputed trend deltas.
 - **Document ingestion**: unified single-pass visual extraction of multi-page
-  PDFs and image documents via `datalab-to/lift` 9.7B VLM (with 4-bit NF4
-  quantization on CUDA and CPU fallback), Option A declarative clinical sentence
+  PDFs and image documents via `datalab-to/lift` 9.7B VLM (**4-bit NF4 applied by
+  `LiftExtractor` itself** — lift's own loader ignores quantization kwargs — ~6.5GiB
+  peak, weights freed after each document; CPU fallback), Option A declarative clinical sentence
   synthesis for RAG, and fast deterministic mock execution.
 - **Reference corpus ingestion**: PubMed abstracts, MedlinePlus summaries,
   USDA FoodData Central nutrition data.
@@ -147,8 +149,10 @@ for claim in response.claims:
 - [x] Graph read path feeding chat: current facts + precomputed trend deltas
 - [x] Patient document ingestion: unified visual extraction via `datalab-to/lift` (PDF + images), Option A RAG chunk synthesis, structured Neo4j graph writes
 - [x] Reference corpus ingestion: PubMed, MedlinePlus, USDA FoodData Central
-- [x] Backend API integration: FastAPI routers, `ml_singletons`, `GPU_LOCK` serialization, HIPAA audit logging
+- [x] Backend API integration: FastAPI routers, `ml_singletons`, LIFT/CHAT GPU modes (`gpu_modes.py`), SSE progress (`POST /api/chat/stream`, `GET /api/documents/{id}/events`; `QAChain.answer(on_progress=...)`), HIPAA audit logging
 - [x] Live end-to-end pipeline tests (real Ollama + Neo4j + Chroma, no fakes)
+- [x] Real-model lift run verified (2026-10-04): synthetic lab PDF → 6 labs / 2 meds / 2 conditions correct, incl. compound `148/92 mmHg`
+- [x] Test suite defaults to mock lift (`ml/tests/conftest.py`); 220 tests pass with Neo4j on the env vars below. `test_retriever_integration.py` and `test_qa_chain_live_e2e.py` need free GPU memory / live infra — stop the backend first or deselect.
 
 **Not started**
 - [ ] Fitness recommendations (`ml/recommendations/fitness/`)
@@ -166,7 +170,7 @@ assumed — see the linked `RESULTS.md` for methodology and numbers.
 | Purpose | Choice | Benchmark |
 |---|---|---|
 | Chat generation | `medgemma:4b` (Ollama) | [`ml/llm/`](llm/) — see `docs/ML_HANDOFF_FOR_ANIKA.md` |
-| Visual document extraction | `datalab-to/lift` (9.7B VLM, 4-bit NF4 & CPU fallback) | Schema-guided extraction replacing fragmented olmOCR + table parsing + prose extraction |
+| Visual document extraction | `datalab-to/lift` (9.7B VLM, 4-bit NF4 applied in `LiftExtractor`; CPU fallback) | Schema-guided extraction replacing fragmented olmOCR + table parsing + prose extraction |
 | Embeddings | MedCPT dual encoder | [`ml/rag/experiments/RESULTS.md`](rag/experiments/RESULTS.md) |
 | Reranking | MedCPT cross-encoder + authority/recency + patient-doc floor | [`ml/rag/reranker_experiments/RESULTS.md`](rag/reranker_experiments/RESULTS.md) |
 | Claim verification | BART-large-MNLI (NLI) | [`ml/claims/experiments/RESULTS.md`](claims/experiments/RESULTS.md) |

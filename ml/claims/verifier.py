@@ -62,8 +62,9 @@ class ClaimVerifier:
 
     def __init__(self, model_name: str | None = None) -> None:
         self.model_name = model_name or os.environ.get("NLI_MODEL", DEFAULT_MODEL)
+        self._device = _DEVICE
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(_DEVICE).eval()
+        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(self._device).eval()
         self._index_to_label = {idx: label.lower() for idx, label in self._model.config.id2label.items()}
 
     def verify(self, claim: str, evidence: list[Chunk]) -> ClaimVerification:
@@ -71,32 +72,35 @@ class ClaimVerifier:
         if not evidence:
             return ClaimVerification(claim, "UNSUPPORTED", 0.0, 0.0, None)
 
-        best_chunk, best_probs = None, None
-        for chunk in evidence:
-            probs = self._predict(premise=chunk.text, hypothesis=claim)
-            # The chunk with the strongest signal in *either* direction is
-            # the most informative one to base a verdict on — a chunk
-            # scored mostly "neutral" says nothing about this claim.
-            informativeness = max(probs["entailment"], probs["contradiction"])
-            if best_probs is None or informativeness > max(best_probs["entailment"], best_probs["contradiction"]):
-                best_chunk, best_probs = chunk, probs
+        scored = [(chunk, self._predict(premise=chunk.text, hypothesis=claim)) for chunk in evidence]
+        # A chunk that clearly entails the claim wins over a contradiction
+        # from any other chunk: NLI reports near-certain "contradiction"
+        # between same-template sentences about *different* facts (e.g. an
+        # HDL value vs an LDL claim), and picking by raw signal strength let
+        # that unrelated chunk outrank the true match (seen live: a correct
+        # patient LDL claim came back CONFLICTING). Otherwise the chunk with
+        # the strongest signal in *either* direction is the most informative
+        # one -- a chunk scored mostly "neutral" says nothing about the claim.
+        entailing = [(c, p) for c, p in scored if p["entailment"] >= ENTAILMENT_THRESHOLD]
+        if entailing:
+            best_chunk, best_probs = max(entailing, key=lambda cp: cp[1]["entailment"])
+        else:
+            best_chunk, best_probs = max(scored, key=lambda cp: max(cp[1]["entailment"], cp[1]["contradiction"]))
 
-        # evidence is non-empty (checked above), so the loop runs at
-        # least once and its first iteration always sets best_probs
-        # (best_probs is None is True on that iteration) -- best_probs is
-        # never actually None here. Asserted, not just relied upon, so a
-        # future refactor that breaks this invariant fails loudly here
-        # instead of surfacing as a confusing downstream KeyError.
-        assert best_probs is not None
         status = self._status_from_probs(best_probs)
         return ClaimVerification(claim, status, best_probs["entailment"], best_probs["contradiction"], best_chunk)
+
+    def move_to(self, device: str) -> None:
+        """Move weights to `device` -- lets the backend park this model in CPU RAM while lift owns the GPU."""
+        self._device = device
+        self._model.to(device)
 
     def _predict(self, premise: str, hypothesis: str) -> dict[str, float]:
         """NLI probability distribution for (premise, hypothesis) = (evidence, claim)."""
         with torch.no_grad():
             inputs = self._tokenizer(
                 premise, hypothesis, truncation=True, return_tensors="pt", max_length=512
-            ).to(_DEVICE)
+            ).to(self._device)
             probs = torch.softmax(self._model(**inputs).logits[0], dim=-1).cpu().tolist()
         return {self._index_to_label[idx]: prob for idx, prob in enumerate(probs)}
 

@@ -19,6 +19,13 @@ from app.services.document_processor import process_document, _rollback_ml_write
 from app.utils.constants import DocumentStatus
 
 
+@pytest.fixture(autouse=True)
+def _no_real_ollama_unload():
+    """gpu_mode(LIFT) evicts Ollama's model; never do that to the dev machine from a test."""
+    with patch("app.services.gpu_modes._unload_ollama_model"):
+        yield
+
+
 def test_get_lift_extractor_singleton():
     """Verify get_lift_extractor returns a cached LiftExtractor singleton."""
     ext1 = get_lift_extractor()
@@ -89,9 +96,9 @@ def test_process_document_success(monkeypatch, tmp_path):
         extractor_arg = mock_extract.call_args.kwargs.get("extractor")
         assert extractor_arg is get_lift_extractor()
 
-        # Chunks built with payload data and document_id
+        # Chunks built with payload data, document_id, and the user's original filename
         mock_build_chunks.assert_called_once_with(
-            dummy_file, data=mock_payload, document_id="doc-test-123"
+            dummy_file, data=mock_payload, document_id="doc-test-123", filename=mock_doc.filename
         )
         mock_retriever.add_documents.assert_called_once_with(mock_chunks)
 

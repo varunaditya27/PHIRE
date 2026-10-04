@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { api, DocumentRead, DocumentUploadResponse } from "@/lib/api";
-import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, RefreshCw, Loader2, ArrowRight } from "lucide-react";
+import { api, DocumentRead, DocumentUploadResponse, ProgressEvent } from "@/lib/api";
+import { ProgressSteps } from "@/components/progress-steps";
+import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, RefreshCw, Loader2, ArrowRight, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -30,40 +31,54 @@ export default function DocumentsPage() {
     localStorage.setItem("phire_documents", JSON.stringify(docs));
   };
 
-  // Polling for active processing documents
+  const [progress, setProgress] = useState<Record<string, ProgressEvent[]>>({});
+  const watching = useRef<Set<string>>(new Set());
+
+  // Follow a document's ingestion over SSE; when the stream ends, re-read its final row.
+  const watchDocument = (id: string) => {
+    if (watching.current.has(id)) return;
+    watching.current.add(id);
+    api.documents
+      .watch(id, (e) => setProgress((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), e] })))
+      .catch((err) => console.error(`Progress stream failed for ${id}:`, err))
+      .finally(async () => {
+        watching.current.delete(id);
+        try {
+          const fresh = await api.documents.get(id);
+          setDocuments((prev) => {
+            const next = prev.map((d) => (d.id === id ? fresh : d));
+            localStorage.setItem("phire_documents", JSON.stringify(next));
+            return next;
+          });
+        } catch (err) {
+          console.error(`Failed to refresh doc ${id}:`, err);
+        }
+      });
+  };
+
+  // Resume watching documents that were still in flight when the page was opened.
   useEffect(() => {
-    const activeDocs = documents.filter(
-      (d) => d.status === "uploaded" || d.status === "processing"
-    );
+    documents
+      .filter((d) => d.status === "uploaded" || d.status === "processing")
+      .forEach((d) => watchDocument(d.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documents.length]);
 
-    if (activeDocs.length === 0) return;
-
-    const interval = setInterval(async () => {
-      let updated = false;
-      const newDocs = await Promise.all(
-        documents.map(async (doc) => {
-          if (doc.status === "uploaded" || doc.status === "processing") {
-            try {
-              const fresh = await api.documents.get(doc.id);
-              if (fresh.status !== doc.status) {
-                updated = true;
-                return fresh;
-              }
-            } catch (err) {
-              console.error(`Failed to poll status for doc ${doc.id}:`, err);
-            }
-          }
-          return doc;
-        })
-      );
-
-      if (updated) {
-        saveDocuments(newDocs);
-      }
-    }, 2500);
-
-    return () => clearInterval(interval);
-  }, [documents]);
+  // Removes the document server-side (vectors, graph facts, file), then from the local list.
+  const handleDelete = async (doc: DocumentRead) => {
+    if (!window.confirm(`Delete "${doc.filename}" and all data extracted from it?`)) return;
+    setErrorMessage(null);
+    try {
+      await api.documents.remove(doc.id);
+      setDocuments((prev) => {
+        const next = prev.filter((d) => d.id !== doc.id);
+        localStorage.setItem("phire_documents", JSON.stringify(next));
+        return next;
+      });
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Failed to delete document.");
+    }
+  };
 
   const handleFileUpload = async (file: File) => {
     if (!file) return;
@@ -93,12 +108,8 @@ export default function DocumentsPage() {
       const nextDocs = [newDoc, ...documents];
       saveDocuments(nextDocs);
 
-      // Trigger processing
-      try {
-        await api.documents.process(res.id);
-      } catch (err) {
-        console.log("Processing triggered or already queued:", err);
-      }
+      // Upload already queues processing server-side; just follow it.
+      watchDocument(res.id);
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to upload document.");
     } finally {
@@ -254,20 +265,38 @@ export default function DocumentsPage() {
                       </div>
                     </div>
 
-                    <span
-                      className={cn(
-                        "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border",
-                        statusDisplay.color
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border",
+                          statusDisplay.color
+                        )}
+                      >
+                        <Icon className={cn("w-3.5 h-3.5 mr-1.5", doc.status === "processing" && "animate-spin")} />
+                        {statusDisplay.label}
+                      </span>
+                      {doc.status !== "processing" && (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(doc)}
+                          aria-label={`Delete ${doc.filename}`}
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-[var(--danger)] hover:bg-[var(--danger-soft)] transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       )}
-                    >
-                      <Icon className={cn("w-3.5 h-3.5 mr-1.5", doc.status === "processing" && "animate-spin")} />
-                      {statusDisplay.label}
-                    </span>
+                    </div>
                   </div>
 
                   {doc.error_message && (
                     <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 p-2.5 rounded-lg border border-rose-200 dark:border-rose-900">
                       {doc.error_message}
+                    </div>
+                  )}
+
+                  {(doc.status === "uploaded" || doc.status === "processing") && (progress[doc.id]?.length ?? 0) > 0 && (
+                    <div className="pt-2 border-t border-border">
+                      <ProgressSteps steps={progress[doc.id]} />
                     </div>
                   )}
 

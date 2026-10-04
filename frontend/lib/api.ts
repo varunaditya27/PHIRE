@@ -1,5 +1,7 @@
 // Types matching the backend Pydantic models
 
+import { readSSE } from "@/lib/sse";
+
 export interface HealthStatus {
   status: "ok" | "degraded";
   database: boolean;
@@ -87,6 +89,12 @@ export interface EvidenceCitation {
   score: number;
 }
 
+/** One backend stage update from an SSE progress stream. */
+export interface ProgressEvent {
+  stage: string;
+  message: string;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // Custom fetch wrapper
@@ -124,8 +132,30 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message }),
     }),
+    /** Same turn as send(), reporting each pipeline stage while it runs. */
+    stream: async (message: string, onProgress: (e: ProgressEvent) => void): Promise<ChatResponse> => {
+      let result: ChatResponse | null = null;
+      let failure: string | null = null;
+      await readSSE(
+        `${API_BASE_URL}/api/chat/stream`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) },
+        (f) => {
+          if (f.event === "progress") onProgress(f.data as ProgressEvent);
+          else if (f.event === "result") result = f.data as ChatResponse;
+          else if (f.event === "error") failure = (f.data as { message: string }).message;
+        }
+      );
+      if (failure) throw new Error(failure);
+      if (!result) throw new Error("Connection closed before an answer arrived.");
+      return result;
+    },
   },
   documents: {
+    /** Stream ingestion stages; resolves when the server finishes (processed or failed). */
+    watch: (id: string, onProgress: (e: ProgressEvent) => void, signal?: AbortSignal) =>
+      readSSE(`${API_BASE_URL}/api/documents/${id}/events`, { signal }, (f) => {
+        if (f.event === "progress") onProgress(f.data as ProgressEvent);
+      }),
     upload: async (file: File) => {
       const formData = new FormData();
       formData.append("file", file);
@@ -139,6 +169,14 @@ export const api = {
       });
     },
     get: (id: string) => fetchAPI<DocumentRead>(`/api/documents/${id}`),
+    /** Delete a document and everything derived from it (vectors, graph facts, file). */
+    remove: async (id: string) => {
+      const response = await fetch(`${API_BASE_URL}/api/documents/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.detail ?? `Delete failed (${response.status})`);
+      }
+    },
     process: (id: string) => fetchAPI(`/api/documents/${id}/process`, { method: "POST" }),
   },
   observations: {

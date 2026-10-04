@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from ml.rag.retriever import Chunk
 
 
-def chunk_to_citation(chunk: "Chunk") -> EvidenceCitation:
+def chunk_to_citation(chunk: "Chunk", score: float | None = None) -> EvidenceCitation:
     return EvidenceCitation(
         evidence_passage_id=chunk.id,
         document_id=chunk.metadata.get("document_id"),
@@ -29,4 +29,5 @@ def chunk_to_citation(chunk: "Chunk") -> EvidenceCitation:
         source_filename=chunk.metadata.get("filename"),
         authority=chunk.metadata.get("authority"),
         page_number=chunk.metadata.get("page_number"),
+        score=score,
     )

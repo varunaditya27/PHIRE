@@ -39,8 +39,8 @@ phire/
 │       ├── api/
 │       │   ├── __init__.py
 │       │   ├── router_health.py      # POST /api/health, GET /api/ping
-│       │   ├── router_chat.py        # POST /api/chat
-│       │   ├── router_documents.py   # POST /api/documents/upload, /process, GET /{id}
+│       │   ├── router_chat.py        # POST /api/chat, POST /api/chat/stream (SSE)
+│       │   ├── router_documents.py   # POST /api/documents/upload, /process, GET /{id}, DELETE /{id}, GET /{id}/events (SSE)
 │       │   ├── router_observations.py# GET /api/observations, GET /api/timeline
 │       │   ├── router_search.py      # GET /api/search/evidence
 │       │   ├── router_evidence.py    # POST /api/evidence/retrieve, POST /api/evidence/verify
@@ -64,7 +64,10 @@ phire/
 │       │   ├── __init__.py
 │       │   ├── document_processor.py  # Background ingestion & transactional rollback
 │       │   ├── graph_reader.py        # Cypher queries for timeline & observations
-│       │   ├── ml_singletons.py       # Lazy cached ML models & GPU_LOCK serialization
+│       │   ├── ml_singletons.py       # Lazy cached ML models & the process-wide GPU_LOCK
+│       │   ├── gpu_modes.py           # gpu_mode(LIFT|CHAT): mutually exclusive GPU residency groups
+│       │   ├── progress.py            # In-memory per-document event channel behind SSE
+│       │   ├── evidence_search.py     # Shared retrieve→rerank→scored citations (search + /evidence/retrieve)
 │       │   ├── citations.py           # Citation formatters
 │       │   └── audit_logger.py        # Dual PostgreSQL & disk file audit logger
 │       │
@@ -95,10 +98,12 @@ phire/
 │   │
 │   ├── components/
 │   │   ├── sidebar.tsx             # Main navigation & theme toggle
+│   │   ├── progress-steps.tsx      # Live SSE stage checklist (chat + documents)
 │   │   └── theme-provider.tsx      # next-themes provider wrapper
 │   │
 │   ├── lib/
-│   │   ├── api.ts                  # Typed backend fetch wrapper & models
+│   │   ├── api.ts                  # Typed backend fetch wrapper & models (+ chat.stream, documents.watch)
+│   │   ├── sse.ts                  # fetch-based Server-Sent Events reader (works for POST)
 │   │   └── utils.ts                # Tailwind clsx/twMerge utility
 │   │
 │   └── public/                     # Static assets & SVG icons
@@ -160,7 +165,7 @@ phire/
 │   │   ├── __init__.py
 │   │   └── qa_chain.py             # End-to-end Reverse-RAG orchestrator
 │   │
-│   └── tests/                       # 217 pytest tests (200 unit tests + 17 live/integration tests)
+│   └── tests/                       # ~227 pytest tests (220 pass without live GPU infra; live/integration ones need Ollama/Neo4j/free VRAM). conftest.py defaults lift to mock mode; test_gpu_modes.py / test_progress.py cover backend services
 │
 ├── evaluation/                      # SHASHWATI OWNS (Planned / Scheduled)
 │   └── (ArchEHR-QA & MedHallBench benchmarks)

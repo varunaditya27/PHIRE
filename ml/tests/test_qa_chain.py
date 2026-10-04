@@ -319,3 +319,14 @@ def test_verified_claim_has_no_source_span_when_evidence_lacks_offsets():
     response = chain.answer("question")
 
     assert response.claims[0].source_span is None
+
+
+def test_answer_reports_each_stage_in_order_via_on_progress():
+    claims = ["Claim A.", "Claim B."]
+    verdicts = {c: ClaimVerification(c, "SUPPORTED", 0.9, 0.0, EVIDENCE[0]) for c in claims}
+    events: list[tuple[str, str]] = []
+
+    build_chain(claims, verdicts).answer("question", on_progress=lambda stage, msg: events.append((stage, msg)))
+
+    assert [stage for stage, _ in events] == ["graph", "retrieve", "generate", "extract", "verify", "verify"]
+    assert events[-1][1].startswith("Verifying claim 2 of 2")

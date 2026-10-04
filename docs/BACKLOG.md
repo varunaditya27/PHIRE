@@ -6,20 +6,20 @@ have a known limitation, a deferred fix, or an undecided design question,
 surfaced through code review, audits, and live testing. Update this as items are
 resolved or new ones are found; don't let it silently go stale.
 
-**As of**: 2026-09-03, following the full-codebase audit across `frontend/`, `backend/`, `ml/`, and `docker/`.
+**As of**: 2026-10-04, after the first real-model end-to-end run (lift 4-bit, GPU modes, SSE). Items marked ~~struck~~ were resolved in `CHANGELOG.md` `[0.7.0]` and are kept one cycle for traceability. Earlier baseline: 2026-09-03 full-codebase audit.
 
 ---
 
 ## 1. `frontend/`
 
 - **`frontend/` V1 is implemented** (Next.js 16, React 19, TailwindCSS) with Dashboard (`/`), Medical Chat (`/chat`), Document Ingestion (`/documents`), and Search & Claim Explorer (`/search`).
-- **`EvidenceCitation.score` evaluates to `0.0%` in Search UI**:
+- ~~**`EvidenceCitation.score` evaluates to `0.0%` in Search UI**~~ (fixed `[0.7.1]`: `/api/search/evidence` and `/api/evidence/retrieve` now rerank and return the cross-encoder relevance as `score`; via `app/services/evidence_search.py`). Original:
   `backend/app/services/citations.py:chunk_to_citation()` does not set `score` on `EvidenceCitation` (defaults to `None`), causing `frontend/app/search/page.tsx` to calculate `(null * 100).toFixed(1) => 0.0%`.
 - **Document history is isolated to browser `localStorage`**:
   Because backend has no `GET /api/documents` list endpoint, `frontend/app/documents/page.tsx` caches document IDs in `localStorage`. Clearing browser cache or switching devices loses the document list in the UI even though records exist in PostgreSQL.
 - **Chat conversation does not persist across page reloads**:
   Chat messages are saved in PostgreSQL `chat_messages` on the backend, but there is no `GET /api/chat/messages` endpoint to rehydrate `frontend/app/chat/page.tsx` upon page load.
-- **Duplicate Document Processing Request**:
+- ~~**Duplicate Document Processing Request**~~ (fixed `[0.7.0]`: documents page no longer calls `/process` after `/upload`; it follows `GET /api/documents/{id}/events`). Original description:
   `POST /api/documents/upload` automatically adds processing to `BackgroundTasks`, but `frontend/app/documents/page.tsx` immediately invokes `POST /api/documents/{id}/process`, frequently receiving `409 Conflict: "Document is already being processed."`.
 - **TypeScript Type Contract Gaps in `frontend/lib/api.ts`**:
   - `Claim.source_span` is typed as `string | null` instead of `[number, number] | null` (matching backend tuple `[start, end]`).
@@ -32,9 +32,13 @@ resolved or new ones are found; don't let it silently go stale.
 
 ## 2. `backend/`
 
-- **No automated test suite**:
+- **SSE progress state is in-process memory** (`app/services/progress.py`): single worker only, history lost on restart (the events endpoint then emits one event with the stored DB status). Multi-worker deployment would need a shared channel (Redis/Postgres LISTEN).
+- **No heartbeat/timeout on the chat stream thread**: if the QA chain hangs, the SSE connection stays open until the client disconnects; the worker thread is a daemon and is not cancelled.
+- **`GPU_LOCK`/`gpu_mode` is per-process**: two uvicorn workers would each think they own the GPU.
+
+- **No automated test suite** (partial: `ml/tests/test_document_processor.py`, `test_gpu_modes.py`, `test_progress.py` exercise some backend services, but there are no router/HTTP-level tests, including for the two SSE endpoints, which were only verified live with curl/Node):
   `ml/` has 217 tests (200 passing unit tests + 17 live integration tests) in `ml/tests/`; `backend/` has zero automated tests. A pytest suite with fixtures for all 8 routers is needed.
-- **Missing document listing endpoint (`GET /api/documents`)**:
+- **Missing document listing endpoint (`GET /api/documents`)** (still open; `DELETE /api/documents/{id}` was added in `[0.7.1]`):
   Needed to query `documents` rows from PostgreSQL to support multi-device/refreshable document management in the frontend.
 - **Missing chat history endpoint (`GET /api/chat/messages`)**:
   Needed to serve past conversation turns with attached claims to the frontend chat UI.
@@ -50,6 +54,10 @@ resolved or new ones are found; don't let it silently go stale.
 ---
 
 ## 3. `ml/`
+
+- **Lift accuracy under 4-bit NF4 is unmeasured.** Verified on one synthetic digital PDF (all values correct). Needs a small labelled set of real scans/photos/multi-page reports to quantify the quantization cost; `lm_head` is quantized too (only the vision tower stays bf16) — if accuracy suffers, keeping `lm_head` bf16 costs roughly +1.5GiB, which would push lift's ~6.5GiB peak to ~8GiB — over this card's usable limit.
+- **NLI template-contradiction workaround is a heuristic.** `ClaimVerifier` now lets an entailing chunk beat contradictions from other chunks (fixes correct patient claims being flagged `CONFLICTING` by a different metric's fact), but it can mask a true conflict when another chunk entails the claim. A metric-aware pre-filter (match claim analyte to fact analyte before NLI) would be principled. See `docs/RESEARCH_LOG.md` 2026-10-04 §2.
+- **`LiftExtractor` reload cost.** Weights are freed after every document (needed to coexist with chat models), so each upload pays ~56s load. Fine for occasional uploads; revisit if batch upload matters.
 
 - **Scanned PDF Fallback Router (RESOLVED)**:
   - Resolved via `datalab-to/lift` 9.7B parameter VLM integration. The unified visual document extraction pipeline processes both native digital PDFs and scanned/photographed documents directly in a single pass, eliminating the scanned-PDF gap.
@@ -95,3 +103,13 @@ resolved or new ones are found; don't let it silently go stale.
 - **Single-Patient Architecture**:
   The system is designed for single-user local deployment (`DEFAULT_PATIENT_ID = "self"`). No authentication or multi-patient scoping exists across APIs or database schemas.
 - **Wearable integration and computer vision** (food recognition, posture analysis) are scheduled for Month 2+ per [`docs/FEATURES_ALIGNED.md`](FEATURES_ALIGNED.md).
+
+---
+
+## 6. Resolved in `[0.7.1]`
+
+- Search relevance `score` was always `null` (UI showed `0.0%`) — now the cross-encoder relevance.
+- Claims and chunk text cited the stored `<uuid>.<ext>` filename — `build_chunks(filename=...)` now carries the user's original name. Documents ingested before this fix keep the old name (delete + re-upload to refresh).
+- No way to delete a document — `DELETE /api/documents/{id}` + a delete button on the documents page; verified against Chroma, Neo4j, disk and Postgres.
+
+Still open from the same review: blood pressure has no numeric value (not charted), chat `citations` is always `[]` (evidence is in `claims`), graph-fact claims (`DERIVED`) show no `source_filename`, document list / chat history don't persist across devices or reloads.

@@ -12,13 +12,13 @@ Three decisions were made explicitly (with the project owner) before rewiring:
 
 1. **Single-patient, not multi-patient.** `patient_id` has been dropped from every route, Postgres table, and Pydantic model. PHIRE runs as one local instance per person, matching `ml/`'s actual design.
 2. **Document ingestion now calls `ml/`'s real pipeline**, not backend's own (weaker, duplicate) PyMuPDF+regex extractor. Backend's `document_processor.py` is now a thin orchestrator that mirrors `ml/rag/ingest/ingest_patient_document.py`'s `main()` sequence.
-3. **`/api/chat` is non-streaming JSON**, not SSE. `QAChain.answer()` is a single blocking call with no token-level streaming — the SSE passthrough stub is gone.
+3. **`/api/chat` is non-streaming JSON.** `QAChain.answer()` is a single blocking call with no token-level streaming (the final answer is built only from verified claims, so there are no tokens worth streaming). Stage-level progress *is* streamed since 2026-10-04 via the additive `POST /api/chat/stream` and `GET /api/documents/{id}/events` SSE endpoints — see §8.
 
 ## 2. Architecture
 
 ```
-Frontend (Next.js, not yet built)
-    │ HTTP :3000 → :8000
+Frontend (Next.js)
+    │ HTTP :3000 (dev default; :3001 if 3000 is taken) → :8000
     ▼
 FastAPI Backend (backend/app/)
     │ in-process Python imports (NOT HTTP) via app/services/ml_singletons.py
@@ -31,7 +31,7 @@ ml/  (Varun's scope — QAChain, HybridRetriever, LiftExtractor,
     ├──→ Chroma (in-process, shared REPO_ROOT/data/chroma, collection
     │    "phire_evidence") — one physical store, one schema, owned by
     │    ml/rag/retriever.py
-    └──→ Neo4j (bolt://localhost:7687) — Longitudinal Health Graph
+    └──→ Neo4j (bolt://localhost:7687 by default; :7688 if 7687 is taken) — Longitudinal Health Graph
          (Patient/Observation/Medication/Condition), owned by ml/graph/
 
 PostgreSQL (backend-owned, relational bookkeeping only):
@@ -86,7 +86,7 @@ All `ml/` instances are built **once**, lazily, and cached (`app/services/ml_sin
 
 Frontend work starts from `docs/FRONTEND_HANDOFF.md` and `docs/API_REFERENCE.md`, generated from this handoff's state — see those instead of treating "no frontend yet" as still true.
 
-Resolved in the review pass after this handoff (see `CHANGELOG.md`'s `[0.4.0]`): the `claims` table now gets real rows from `router_chat.py`; a `GPU_LOCK` in `ml_singletons.py` now serializes chat generation against document ingestion instead of just documenting the OOM risk; the `nginx` proxy profile now runs host-networked like `backend` so it can actually reach it.
+Resolved in the review pass after this handoff (see `CHANGELOG.md`'s `[0.4.0]`): the `claims` table now gets real rows from `router_chat.py`; a `GPU_LOCK` in `ml_singletons.py` serialized chat generation against document ingestion (superseded by the GPU modes in §8); the `nginx` proxy profile now runs host-networked like `backend` so it can actually reach it.
 
 ## 7. Testing performed
 
@@ -162,3 +162,29 @@ curl -X POST http://localhost:8000/api/health
 # {"status":"ok","database":true,"ollama":true,"vector_store":true,"graph":true}
 ```
 If `vector_store`/`graph` are `false`, check `detail` in the response — almost always either `ml/` isn't importable (PYTHONPATH, or Docker network mode) or Neo4j/Ollama isn't reachable at the configured URI.
+
+## 8. GPU modes and SSE progress (added 2026-10-04)
+
+### 8.1 Two GPU residency modes — `app/services/gpu_modes.py`
+
+On the 8GB dev GPU, quantized lift (~6.5GiB peak) cannot coexist with the chat-time models, so the backend keeps exactly one of two **groups** resident:
+
+| Mode | Resident on GPU | Measured |
+|---|---|---|
+| `LIFT` | `datalab-to/lift` (4-bit NF4) only | ~6.5GiB peak while extracting |
+| `CHAT` | MedCPT query+article encoders, cross-encoder reranker, BART-large-MNLI, Ollama's `medgemma:4b` | ~6.9GB total (Ollama gets ~2.3 of its 3.5GiB on-GPU) |
+
+`gpu_mode(mode, on_progress=None)` is a context manager that **replaces the bare `GPU_LOCK`** at every call site (`router_chat`, `router_claims`, `router_evidence` ×2, `router_search`, `document_processor`). It takes the process-wide lock, and — only if the mode *changed* — evicts the other group: entering `LIFT` unloads Ollama's model (`keep_alive: 0` via its API) and moves the in-process chat models to CPU RAM (`move_to("cpu")`, ~1s to bring back); entering `CHAT` releases lift and moves them back to CUDA. Requesting the mode that is already active is a no-op, so consecutive chats never swap (warm chat ≈ 5.6s; the first chat after an upload ≈ 15s for the reload). Singletons not yet built are never constructed just to be moved.
+
+`document_processor.process_document` therefore runs extraction under `gpu_mode(LIFT)` and embedding/indexing under `gpu_mode(CHAT)`. `LiftExtractor` additionally frees its own weights after every document (`_release_model`).
+
+### 8.2 SSE endpoints and the progress channel
+
+- `POST /api/chat/stream` — `router_chat.run_chat()` is now the shared turn implementation behind both `POST /api/chat` and this endpoint. The stream runs the turn on its own thread with its own `SessionLocal()` (the request-scoped `get_db` session is closed before a streaming body finishes) and passes events through a `queue.Queue`.
+- `GET /api/documents/{id}/events` — backed by `app/services/progress.py`, an in-memory per-document event list + `threading.Condition`. `process_document` publishes stages; subscribers get history replayed then live events; `upload`/`/process` call `progress.reset()` first. Single-process only (matches the single-user deployment); history is lost on restart, in which case the endpoint emits one event with the stored DB status.
+- Frame formats and stage lists: [API_REFERENCE.md](API_REFERENCE.md).
+- `ml/chains/qa_chain.py`'s `QAChain.answer()` takes an optional `on_progress(stage, message)` callback that the chat stream feeds; it never affects results.
+
+### 8.3 Running this machine's stack
+
+Other projects on the dev box occupy ports 3000, 7474/7687 and 5433. PHIRE ran on: frontend `:3001`, backend `:8000`, Postgres `:5432`, Neo4j bolt `:7688` / http `:7475` (`NEO4J_BOLT_PORT=7688 NEO4J_HTTP_PORT=7475 docker compose -f docker/docker-compose.yml up -d postgres neo4j`), host Ollama `:11434`. Export `NEO4J_URI`/`NEO4J_PASSWORD` for the backend and for `ml/` tests that touch Neo4j. Backend dependencies were installed into `ml/.venv` (single shared environment) rather than a second multi-GB torch venv. Add the frontend origin to `CORS_ORIGINS`.
