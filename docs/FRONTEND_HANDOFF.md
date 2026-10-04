@@ -31,7 +31,7 @@ npm run dev   # Runs on http://localhost:3000 (use `npx next dev -p 3001` if 300
 
 | Route | File Path | Description & Features |
 |---|---|---|
-| **`/` (Dashboard)** | [`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx) | **Patient Overview & Health Timeline**: Fetches `GET /api/timeline` and `GET /api/observations`. Renders multi-series Recharts line graphs for numeric lab metrics (series with no numeric readings are skipped; blood pressure is charted as separate Systolic and Diastolic series) and a recent observations feed. |
+| **`/` (Dashboard)** | [`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx) | **Patient Overview & Health Timeline**: Fetches `GET /api/timeline` and `GET /api/observations`. Renders one Recharts chart **per unit** (`components/timeline-chart.tsx`: mg/dL, mmHg, %, … so unlike scales never share an axis; 8-colour palette legible in light and dark; series with no numeric readings skipped; blood pressure charted as Systolic and Diastolic) and a **Latest Readings** feed (latest per metric, newest first; conditions/medications show their status; units are not repeated — `lib/readings.ts`). |
 | **`/chat` (Medical Chat)** | [`frontend/app/chat/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/chat/page.tsx) | **Evidence-Attributed Assistant**: Multi-turn chat interface calling `POST /api/chat/stream` (SSE): while the backend works, a live step checklist (`components/progress-steps.tsx`) shows each stage with a per-step elapsed timer, replacing the old static spinner. Features expandable per-claim audit trails with NLI status badges (`SUPPORTED`, `DERIVED`, `CONFLICTING`, `UNSUPPORTED`), confidence percentages, and source file citations. |
 | **`/documents` (Ingestion)** | [`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx) | **Document Uploader**: Drag-and-drop file uploader (PDF, PNG, JPEG) up to 25MB calling `POST /api/documents/upload`. Live ingestion progress over SSE from `GET /api/documents/{id}/events` (stage checklist on each card: queued → loading vision model → reading document → indexing → saving to timeline → done/failed); the old 2.5s polling is gone. On stream end the page re-reads the final row via `GET /api/documents/{id}`. |
 | **`/search` (Explorer)** | [`frontend/app/search/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/search/page.tsx) | **Evidence & Claim Explorer**: Tab 1 executes hybrid search via `GET /api/search/evidence`. Tab 2 allows direct NLI claim verification via `POST /api/evidence/verify`. |
@@ -52,6 +52,10 @@ Defined in [`frontend/app/globals.css`](file:///home/varun/Projects/PHIRE/fronte
   - Body: `IBM Plex Sans` (`var(--font-sans)`)
   - Headings / Editorial: `Newsreader` (`var(--font-editorial)`)
   - Numerical metrics / IDs / Spans: `IBM Plex Mono` (`var(--font-mono)`)
+
+---
+
+**Cross-cutting UI (added `[0.8.1]`):** below the `md` breakpoint the sidebar becomes a compact top bar (`MobileNav` in `components/sidebar.tsx`) and page padding shrinks, so the app is usable at 390px; a wellness/not-a-medical-device disclaimer is shown in the sidebar and under the chat input; the documents card badge follows the live SSE stream (it used to read "Uploaded" for the whole run); search and verifier results link to their public source URL.
 
 ---
 

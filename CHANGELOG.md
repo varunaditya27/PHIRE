@@ -503,6 +503,27 @@ Verified on a throwaway Compose project (own ports, volumes, data dir; dev stack
 
 ---
 
+## [0.8.1] - 2026-10-04
+
+### Frontend end-to-end review (real Chrome, against the Docker stack) and fixes
+
+Every page was driven with `playwright-core` + system Chrome against the running Docker stack: dashboard, chat (history rehydration, live SSE steps, answer/claim audit), documents (unsupported-type error, upload with live progress, reload persistence, delete with confirm), search (both tabs), dark mode and a 390px viewport; console errors, failed requests and every API call were captured (all 2xx, no console problems). Findings fixed:
+
+- **Dashboard showed units twice** ("51 mg/dL mg/dL", "132/84 mmHg mmHg"): `value` already carries the unit. `lib/readings.ts` splits it once.
+- **One shared chart axis** flattened HbA1c (~6) against blood pressure (~140), and the 5-colour palette repeated across 7 series (two pairs identical; the darkest ink vanished in dark mode). Now one chart per unit (`components/timeline-chart.tsx`) with an 8-colour palette legible on both themes.
+- **"Recent Observations" listed all 24 readings** including superseded ones: now "Latest Readings" (latest per metric, newest first); medications/conditions show their status; `ObservationRead.value`/`observed_date` typed nullable.
+- **Documents badge read "Uploaded" for the whole 1–2 minute run** while the checklist showed progress: it now follows the live stream (and hides Delete mid-run).
+- **Not usable on a phone**: the fixed 256px sidebar left 134px for content. Below `md` it is now a top bar; page paddings are responsive (no horizontal overflow on any page at 390px).
+- **No medical disclaimer anywhere** in the UI: added to the sidebar and under the chat input.
+- Search/verifier public sources are now links; a null match score no longer renders as "0.0%".
+- Chat answers joined claims without punctuation ("…2026-03-12 HbA1c was 5.8%…"): `QAChain` now ends each claim with a sentence terminator. Test added.
+
+Remaining frontend gaps and ideas are listed in `docs/BACKLOG.md` §1 (reference-corpus text spacing, chat clear/timestamps, stream abort, chart range filter, accessibility pass, committed e2e tests). **265 tests passing.**
+
+**Docs updated:** `docs/FRONTEND_HANDOFF.md`, `docs/BACKLOG.md`, `REPO_STRUCTURE.md`.
+
+---
+
 ## Future Versions
 
 See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.

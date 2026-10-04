@@ -379,3 +379,12 @@ def test_trend_claim_cites_every_source_document():
     assert verified.status == "DERIVED"
     assert verified.source_filenames == ["jan.pdf", "mar.pdf"]
     assert verified.source_filename == "jan.pdf"
+
+
+def test_answer_joins_claims_as_punctuated_sentences():
+    claims = ["HbA1c was 6.1% on 2026-03-12", "HbA1c was 5.8% on 2026-09-05.", "Is it lower?"]
+    verdicts = {c: ClaimVerification(c, "SUPPORTED", 0.9, 0.0, EVIDENCE[0]) for c in claims}
+
+    answer = build_chain(claims, verdicts).answer("question").answer
+
+    assert answer == "HbA1c was 6.1% on 2026-03-12. HbA1c was 5.8% on 2026-09-05. Is it lower?"

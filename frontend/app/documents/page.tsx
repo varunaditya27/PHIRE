@@ -148,7 +148,7 @@ export default function DocumentsPage() {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto space-y-8">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-8">
       <div>
         <h1 className="text-3xl tracking-tight text-foreground font-[family-name:var(--font-editorial)] font-medium">Document Ingestion</h1>
         <p className="text-muted-foreground mt-1">
@@ -219,7 +219,11 @@ export default function DocumentsPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {documents.map((doc) => {
-              const statusDisplay = getStatusDisplay(doc.status);
+              // The stored status only flips at the end of a run; once the stream reports past "queued"
+              // the document is in fact processing, so don't keep showing "Uploaded" for a minute or two.
+              const status =
+                doc.status === "uploaded" && progress[doc.id]?.some((e) => e.stage !== "queued") ? "processing" : doc.status;
+              const statusDisplay = getStatusDisplay(status);
               const Icon = statusDisplay.icon;
               return (
                 <div
@@ -254,10 +258,10 @@ export default function DocumentsPage() {
                           statusDisplay.color
                         )}
                       >
-                        <Icon className={cn("w-3.5 h-3.5 mr-1.5", doc.status === "processing" && "animate-spin")} />
+                        <Icon className={cn("w-3.5 h-3.5 mr-1.5", status === "processing" && "animate-spin")} />
                         {statusDisplay.label}
                       </span>
-                      {doc.status !== "processing" && (
+                      {status !== "processing" && (
                         <button
                           type="button"
                           onClick={() => handleDelete(doc)}

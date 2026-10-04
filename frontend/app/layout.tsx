@@ -37,9 +37,9 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={`${ibmPlexSans.variable} ${ibmPlexMono.variable} ${newsreader.variable} h-full antialiased`}>
         <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
-          <div className="flex h-screen overflow-hidden bg-background">
+          <div className="flex h-screen flex-col md:flex-row overflow-hidden bg-background">
             <Sidebar />
-            <main className="flex-1 overflow-y-auto">
+            <main className="flex-1 min-w-0 overflow-y-auto">
               {children}
             </main>
           </div>

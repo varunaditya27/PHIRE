@@ -21,12 +21,19 @@ resolved or new ones are found; don't let it silently go stale.
   Chat messages are saved in PostgreSQL `chat_messages` on the backend, but there is no `GET /api/chat/messages` endpoint to rehydrate `frontend/app/chat/page.tsx` upon page load.
 - ~~**Duplicate Document Processing Request**~~ (fixed `[0.7.0]`: documents page no longer calls `/process` after `/upload`; it follows `GET /api/documents/{id}/events`). Original description:
   `POST /api/documents/upload` automatically adds processing to `BackgroundTasks`, but `frontend/app/documents/page.tsx` immediately invokes `POST /api/documents/{id}/process`, frequently receiving `409 Conflict: "Document is already being processed."`.
-- **TypeScript Type Contract Gaps in `frontend/lib/api.ts`**:
+- ~~**TypeScript Type Contract Gaps in `frontend/lib/api.ts`**~~ (fixed `[0.7.3]`/`[0.8.1]`: `source_span` is `[number, number]`, `ObservationRead.value`/`observed_date` are nullable). Original:
   - `Claim.source_span` is typed as `string | null` instead of `[number, number] | null` (matching backend tuple `[start, end]`).
   - `ObservationRead.value` and `ObservationRead.observed_date` are typed non-nullable, but backend condition records return `value: null`.
-- **Missing observation status badge**:
+- ~~**Missing observation status badge**~~ (conditions/medications now show their status as the headline value on the dashboard cards, `[0.8.1]`). Original:
   Condition and medication statuses (e.g. `"active"`, `"continued"`) are not displayed alongside values in `frontend/app/page.tsx`.
-- **No automated test harness** on `frontend/` (Jest/Vitest/Playwright).
+- **No automated test harness** on `frontend/` (Jest/Vitest/Playwright). The `[0.8.1]` review drove every page in real Chrome with `playwright-core` (scripts not committed); turning that into a committed smoke test is the natural next step.
+- **Frontend review (`[0.8.1]`) — still open:**
+  - Public reference passages (MedlinePlus) display with missing spaces between sentences ("cholesterol?Cholesterol is a waxy…"): an ingestion/cleaning issue in `ml/rag/ingest`, fixed only by re-ingesting the corpus.
+  - Chat has no "clear conversation" and no per-message timestamps; stored history from before `[0.8.1]` still shows run-on answers.
+  - Navigating away mid-chat does not abort the in-flight stream (no `AbortController`); the backend turn completes and is saved, so nothing is lost.
+  - Dashboard charts plot every reading as a line; a single-reading metric shows a lone dot, and there is no date-range filter.
+  - Match scores on search results sit near 100% when every hit is relevant (it is the cross-encoder's real output).
+  - Accessibility pass not done (chat input has no label; chart has no text alternative).
 
 ---
 

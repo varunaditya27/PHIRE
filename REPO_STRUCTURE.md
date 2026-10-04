@@ -99,11 +99,13 @@ phire/
 │   ├── components/
 │   │   ├── sidebar.tsx             # Main navigation & theme toggle
 │   │   ├── progress-steps.tsx      # Live SSE stage checklist (chat + documents)
+│   │   ├── timeline-chart.tsx      # One Recharts line chart per unit group (dashboard)
 │   │   └── theme-provider.tsx      # next-themes provider wrapper
 │   │
 │   ├── lib/
 │   │   ├── api.ts                  # Typed backend fetch wrapper & models (+ chat.stream, documents.watch)
 │   │   ├── sse.ts                  # fetch-based Server-Sent Events reader (works for POST)
+│   │   ├── readings.ts             # Observation presentation helpers (unit-aware value split, latest per metric)
 │   │   └── utils.ts                # Tailwind clsx/twMerge utility
 │   │
 │   └── public/                     # Static assets & SVG icons

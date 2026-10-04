@@ -148,7 +148,7 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
-      <div className="border-b border-border px-8 py-4 bg-card">
+      <div className="border-b border-border px-4 md:px-8 py-4 bg-card">
         <h1 className="text-xl font-medium tracking-tight text-foreground flex items-center font-[family-name:var(--font-editorial)]">
           <ShieldCheck className="w-5 h-5 mr-2 text-[var(--evidence)]" />
           Evidence-Attributed Medical Chat
@@ -159,7 +159,7 @@ export default function ChatPage() {
       </div>
 
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-4xl w-full mx-auto custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-6 max-w-4xl w-full mx-auto custom-scrollbar">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -309,6 +309,10 @@ export default function ChatPage() {
             <Send className="w-5 h-5" />
           </button>
         </form>
+        <p className="max-w-4xl mx-auto mt-2 text-center text-[11px] text-muted-foreground">
+          PHIRE is a wellness decision-support tool, not a medical device. It does not diagnose and is not for
+          emergencies — contact a clinician or emergency services for urgent concerns.
+        </p>
       </div>
     </div>
   );

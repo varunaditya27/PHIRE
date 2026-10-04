@@ -60,13 +60,14 @@ export interface ObservationRead {
   document_id: string | null;
   type: "lab" | "medication" | "condition" | "symptom" | "vital";
   name: string;
-  value: string;
+  // Conditions and medications carry no value / date (the backend sends null).
+  value: string | null;
   value_numeric: number | null;
   unit: string | null;
   reference_range: string | null;
   interpretation: string | null;
   status: string | null;
-  observed_date: string;
+  observed_date: string | null;
 }
 
 export interface TimelinePoint {

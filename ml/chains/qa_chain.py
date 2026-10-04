@@ -89,6 +89,12 @@ class ChatResponse:
     evidence: list[Chunk] = field(default_factory=list)
 
 
+def _as_sentence(claim: str) -> str:
+    """Claim text with terminal punctuation, so joined claims read as sentences, not one run-on line."""
+    claim = claim.strip()
+    return claim if claim.endswith((".", "!", "?")) else f"{claim}."
+
+
 class QAChain:
     """Wires retrieval, reranking, generation, extraction, and verification into one call."""
 
@@ -184,7 +190,7 @@ class QAChain:
             progress("verify", f"Verifying claim {i} of {len(claims)} against your records and evidence")
             verified.append(self._verify_claim(claim, verification_pool))
         supported = [c for c in verified if c.status in ("SUPPORTED", "DERIVED") and c.confidence >= ABSTENTION_THRESHOLD]
-        answer = " ".join(c.claim for c in supported) if supported else NO_EVIDENCE_MESSAGE
+        answer = " ".join(_as_sentence(c.claim) for c in supported) if supported else NO_EVIDENCE_MESSAGE
         return ChatResponse(answer=answer, claims=verified, evidence=evidence)
 
     def _graph_facts(
