@@ -33,6 +33,7 @@ from app.models.response import ChatMessageRead, ChatRequest, ChatResponse
 from app.services.citations import chunk_to_citation
 from app.services.gpu_modes import CHAT, gpu_mode
 from app.services.ml_singletons import get_qa_chain
+from app.utils.sse import sse_frame
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -120,11 +121,6 @@ def chat_messages(limit: int = 200, db: Session = Depends(get_db)) -> list[ChatM
     return list(reversed(newest_first))
 
 
-def _sse(event: str, data: dict) -> str:
-    """One Server-Sent Event frame."""
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
 @router.post("/stream")
 def chat_stream(request: ChatRequest) -> StreamingResponse:
     """Same turn as POST /api/chat, streamed as SSE: `progress` events while
@@ -151,9 +147,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
 
     def stream() -> Iterator[str]:
         threading.Thread(target=work, daemon=True).start()
-        yield _sse("progress", {"stage": "start", "message": "Question received"})
+        yield sse_frame("progress", {"stage": "start", "message": "Question received"})
         while (item := events.get()) is not None:
-            yield _sse(*item)
+            yield sse_frame(*item)
 
     return StreamingResponse(
         stream(),

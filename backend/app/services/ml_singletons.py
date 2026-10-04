@@ -88,6 +88,11 @@ def get_lift_extractor():
     )
 
 
+def get_extractor():
+    """The document extractor in use (lift today; see the CPU variant for the alternative)."""
+    return get_lift_extractor()
+
+
 @lru_cache
 def get_retriever():
     from ml.rag.retriever import HybridRetriever

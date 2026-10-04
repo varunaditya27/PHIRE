@@ -9,10 +9,14 @@ backend_path = str(Path(__file__).resolve().parents[2] / "backend")
 if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
-# Mock sqlalchemy modules if not installed in ml/.venv
-sys.modules.setdefault("sqlalchemy", MagicMock())
-sys.modules.setdefault("sqlalchemy.orm", MagicMock())
-sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
+# Stub sqlalchemy only when it is genuinely not installed. (setdefault alone replaced the real package with a
+# MagicMock whenever it had not been imported *yet*, which broke any test importing the real app after this file.)
+try:
+    import sqlalchemy  # noqa: F401
+except ImportError:
+    sys.modules.setdefault("sqlalchemy", MagicMock())
+    sys.modules.setdefault("sqlalchemy.orm", MagicMock())
+    sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
 from app.services.ml_singletons import get_lift_extractor
 from app.services.document_processor import process_document, _rollback_ml_writes
@@ -193,3 +197,74 @@ def test_rollback_builds_the_retriever_under_the_gpu_lock():
         _rollback_ml_writes("doc-1")
 
     assert events == ["enter", "delete", "exit"]
+
+
+def _process(payload, tmp_path, extra_patches=()):
+    """Run process_document over a payload with ml/ and storage faked; returns the document and the graph writers."""
+    from contextlib import ExitStack
+
+    dummy_file = tmp_path / "report.pdf"
+    dummy_file.write_bytes(b"%PDF dummy")
+    doc = MagicMock(id="doc-date-1", filename="report.pdf", storage_path=str(dummy_file), status=DocumentStatus.UPLOADED.value)
+    graph_cm = MagicMock()
+    graph_cm.__enter__.return_value = MagicMock()
+    with ExitStack() as stack:
+        stack.enter_context(patch("ml.rag.ingest.patient_documents.extract_document_data", return_value=payload))
+        stack.enter_context(patch("ml.rag.ingest.ingest_patient_document.build_chunks", return_value=[MagicMock()]))
+        stack.enter_context(patch("app.services.document_processor.get_retriever", return_value=MagicMock()))
+        stack.enter_context(patch("app.services.document_processor.new_graph_client", return_value=graph_cm))
+        writers = {n: stack.enter_context(patch(f"ml.graph.{m}.write_{n}")) for n, m in
+                   (("medications", "medications"), ("conditions", "conditions"), ("observations", "observations"))}
+        process_document(MagicMock(), doc)
+    return doc, writers
+
+
+def test_document_with_a_date_is_saved_with_its_extraction_and_does_not_need_one(tmp_path):
+    payload = {"document_date": "12 March 2026", "observations": [{"name": "LDL", "value": "138", "unit": "mg/dL"}],
+               "medications": [], "conditions": [], "narrative_sections": []}
+
+    doc, writers = _process(payload, tmp_path)
+
+    assert (doc.document_date, doc.needs_date) == ("2026-03-12", False)
+    assert doc.extracted_data == payload                                   # saved so it can be re-dated without lift
+    assert writers["observations"].call_args[0][3][0]["effective"] == "2026-03-12"
+
+
+def test_document_without_any_date_is_flagged_and_uses_a_provisional_date(tmp_path):
+    from datetime import date
+
+    payload = {"document_date": None, "observations": [{"name": "LDL", "value": "138", "unit": "mg/dL"}],
+               "medications": [], "conditions": [], "narrative_sections": []}
+
+    doc, writers = _process(payload, tmp_path)
+
+    assert doc.needs_date is True
+    assert doc.document_date == date.today().isoformat()                   # provisional, so the timeline still orders
+    assert doc.status == DocumentStatus.PROCESSED.value                   # processed, but flagged for the user
+
+
+def test_redate_rebuilds_facts_and_chunks_from_the_saved_extraction(tmp_path):
+    from app.services.document_processor import redate_document
+
+    payload = {"document_date": None, "observations": [{"name": "LDL", "value": "138", "unit": "mg/dL"}],
+               "medications": [], "conditions": [], "narrative_sections": []}
+    dummy = tmp_path / "r.pdf"
+    dummy.write_bytes(b"%PDF")
+    doc = MagicMock(id="doc-redate", filename="r.pdf", storage_path=str(dummy), extracted_data=payload, needs_date=True)
+    retriever, graph_cm = MagicMock(), MagicMock()
+    graph_cm.__enter__.return_value = MagicMock()
+
+    with patch("app.services.document_processor.get_retriever", return_value=retriever), \
+         patch("app.services.document_processor.new_graph_client", return_value=graph_cm), \
+         patch("ml.graph.deletion.delete_document_facts") as delete_facts, \
+         patch("ml.rag.ingest.ingest_patient_document.build_chunks", return_value=[MagicMock()]) as build_chunks, \
+         patch("ml.graph.medications.write_medications"), patch("ml.graph.conditions.write_conditions"), \
+         patch("ml.graph.observations.write_observations") as write_obs:
+        redate_document(MagicMock(), doc, "2026-01-15")
+
+    retriever.delete_by_document_id.assert_called_once_with("doc-redate")   # old chunks removed first
+    delete_facts.assert_called_once()                                        # old graph facts removed first
+    assert build_chunks.call_args.kwargs["data"]["document_date"] == "2026-01-15"
+    assert write_obs.call_args[0][3][0]["effective"] == "2026-01-15"
+    assert (doc.document_date, doc.needs_date) == ("2026-01-15", False)
+    assert doc.extracted_data["document_date"] == "2026-01-15"

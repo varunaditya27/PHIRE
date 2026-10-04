@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { api, DocumentRead, DocumentUploadResponse, ProgressEvent } from "@/lib/api";
 import { ProgressSteps } from "@/components/progress-steps";
+import { DateNeededPrompt } from "@/components/date-needed-prompt";
 import { UploadCloud, FileText, CheckCircle2, Clock, AlertCircle, RefreshCw, Loader2, ArrowRight, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -86,6 +87,8 @@ export default function DocumentsPage() {
         uploaded_at: new Date().toISOString(),
         processed_at: null,
         error_message: null,
+        document_date: null,
+        needs_date: false,
       };
 
       setDocuments((prev) => [newDoc, ...prev]);
@@ -284,6 +287,13 @@ export default function DocumentsPage() {
                     <div className="pt-2 border-t border-border">
                       <ProgressSteps steps={progress[doc.id]} />
                     </div>
+                  )}
+
+                  {doc.status === "processed" && doc.needs_date && (
+                    <DateNeededPrompt
+                      doc={doc}
+                      onSaved={(updated) => setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))}
+                    />
                   )}
 
                   {doc.status === "processed" && (

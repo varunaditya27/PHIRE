@@ -53,6 +53,10 @@ export interface DocumentRead {
   uploaded_at: string;
   processed_at: string | null;
   error_message: string | null;
+  /** Clinical date applied to this document's facts (ISO); provisional while needs_date is true. */
+  document_date: string | null;
+  /** No date could be extracted: the user should supply the real one. */
+  needs_date: boolean;
 }
 
 export interface ObservationRead {
@@ -182,6 +186,12 @@ export const api = {
       });
     },
     list: () => fetchAPI<DocumentRead[]>("/api/documents"),
+    /** Supply a missing clinical date (YYYY-MM-DD); the backend rebuilds the document's facts at that date. */
+    setDate: (id: string, documentDate: string) =>
+      fetchAPI<DocumentRead>(`/api/documents/${id}/date`, {
+        method: "PUT",
+        body: JSON.stringify({ document_date: documentDate }),
+      }),
     get: (id: string) => fetchAPI<DocumentRead>(`/api/documents/${id}`),
     /** Delete a document and everything derived from it (vectors, graph facts, file). */
     remove: async (id: string) => {

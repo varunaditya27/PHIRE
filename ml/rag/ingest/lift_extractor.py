@@ -21,6 +21,9 @@ DEFAULT_MODEL_ID = os.environ.get("LIFT_MODEL", "datalab-to/lift")
 class LiftExtractor:
     """Extracts structured clinical data from PDFs and images via datalab-to/lift."""
 
+    # Which GPU residency group (backend gpu_modes.py) this extractor needs while it runs.
+    gpu_mode = "lift"
+
     def __init__(
         self,
         model_id: str | None = None,

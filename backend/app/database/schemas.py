@@ -22,7 +22,7 @@ per-row scoping needed.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,10 +35,11 @@ def _uuid() -> uuid.UUID:
 
 
 class Document(Base):
-    """Upload bookkeeping only -- text/graph extraction is ml/'s job (see
-    app/services/document_processor.py), so this row just tracks the
-    immutable original artifact and its processing status, not derived
-    structured data."""
+    """Upload bookkeeping: the immutable original artifact and its processing status.
+
+    Extraction and graph/index writing are ml/'s job (app/services/document_processor.py); this row
+    additionally keeps the structured extraction (`extracted_data`) and the clinical date applied to it,
+    so a missing date can be corrected later without re-running extraction."""
 
     __tablename__ = "documents"
 
@@ -51,6 +52,11 @@ class Document(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunk_count: Mapped[int | None] = mapped_column(nullable=True)  # chunks indexed into ml/'s Chroma store
+    # The structured extraction, kept so facts/chunks can be rebuilt (e.g. after the user supplies a date)
+    # without re-running the vision model.
+    extracted_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    document_date: Mapped[str | None] = mapped_column(String, nullable=True)  # clinical date applied to its facts (ISO)
+    needs_date: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
 
 class ChatMessage(Base):

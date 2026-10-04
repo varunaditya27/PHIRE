@@ -54,3 +54,12 @@ def test_find_document_date_reads_month_name_dates():
     assert find_document_date("Report date: 1 March 2026") == "2026-03-01"
     assert find_document_date("Report date: March 1, 2026") == "2026-03-01"
     assert find_document_date("Report date: 1 Mar 2026") == "2026-03-01"
+
+
+def test_extract_document_date_returns_none_instead_of_guessing_today():
+    from ml.graph.document_dates import extract_document_date, find_document_date
+
+    assert extract_document_date("Hemoglobin 13.2 g/dL, no date anywhere") is None
+    assert extract_document_date("Date of Service: 14/03/2026") == "2026-03-14"
+    assert extract_document_date("DOB: 1978-04-22") is None            # a date of birth is not the document date
+    assert find_document_date("no date anywhere") != ""                # the CLI/builders still fall back to today
