@@ -186,3 +186,31 @@ def test_get_trend_facts_empty_when_metric_has_only_one_reading(graph_client):
     write_observations(graph_client, "doc_solo", "solo.pdf", observations, patient_id=TEST_PATIENT_ID)
 
     assert get_trend_facts(graph_client, patient_id=TEST_PATIENT_ID) == []
+
+
+def test_graph_retrieval_follows_real_relationships_across_documents(graph_client):
+    """Longitudinal history, drug->metric hop and conflict detection, against real Cypher."""
+    from ml.graph.graph_retrieval import retrieve_graph_context
+    from ml.graph.observations import build_lift_observations
+
+    def ldl(value, doc, date):
+        return build_lift_observations([{"name": "LDL", "value": str(value), "unit": "mg/dL"}], doc, date)
+
+    for doc, filename, date, value in (("d1", "march.pdf", "2026-03-12", 138), ("d2", "june.pdf", "2026-06-01", 126),
+                                       ("d3", "other_lab.pdf", "2026-06-01", 131)):  # d3 disagrees with d2 on the same day
+        write_observations(graph_client, doc, filename, ldl(value, doc, date), patient_id=TEST_PATIENT_ID)
+    meds = build_medications([{"name": "Atorvastatin", "dosage": "20 mg", "frequency": "daily", "status": "active"}], "", "d1", "2026-03-12")
+    write_medications(graph_client, "d1", "march.pdf", meds, patient_id=TEST_PATIENT_ID)
+    conds = build_conditions([{"name": "Hypercholesterolemia", "status": "active"}], "", "d1", "2026-03-12")
+    write_conditions(graph_client, "d1", "march.pdf", conds, patient_id=TEST_PATIENT_ID)
+
+    ctx = retrieve_graph_context(graph_client, "How is my statin working?", patient_id=TEST_PATIENT_ID)
+
+    assert ctx.linked["medications"] == ["Atorvastatin"] and ctx.linked["metrics"] == ["LDL Cholesterol"]
+    assert ctx.linked["conditions"] == ["Hypercholesterolemia"]                # hopped back from the metric
+    sentences = [s for s, _ in ctx.derived]
+    assert any("is followed through LDL Cholesterol" in s and "march.pdf" in s for s in sentences)
+    assert any("4 readings" not in s and "3 readings from 2026-03-12 to 2026-06-01" in s for s in sentences)
+    conflict = next(s for s in sentences if s.startswith("Conflicting records"))
+    assert "126 mg/dL in june.pdf" in conflict and "131 mg/dL in other_lab.pdf" in conflict
+    assert retrieve_graph_context(graph_client, "What should I eat for breakfast?", patient_id=TEST_PATIENT_ID) is None

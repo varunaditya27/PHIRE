@@ -23,6 +23,7 @@ from ml.claims.confidence import compute_confidence
 from ml.claims.extractor import ClaimExtractor
 from ml.claims.verifier import ClaimVerifier
 from ml.graph.client import GraphClient
+from ml.graph.graph_retrieval import GraphContext, retrieve_graph_context
 from ml.graph.patient_context import (
     get_current_patient_facts_with_sources,
     get_patient_facts,
@@ -133,10 +134,15 @@ class QAChain:
         """
         progress = on_progress or (lambda stage, message: None)
         progress("graph", "Reading your health records")
-        history_facts, current_facts, trend_pairs = self._graph_facts(need_history=observations is None)
+        history_facts, current_facts, trend_pairs, graph_ctx = self._graph_facts(
+            question, need_history=observations is None,
+        )
         trend_facts = [fact for fact, _ in trend_pairs]
+        if graph_ctx:
+            linked = [name for names in graph_ctx.linked.values() for name in names]
+            progress("graph", f"Following links in your health graph: {', '.join(linked[:4]) or 'your records'}")
         if observations is None:
-            observations = history_facts + trend_facts
+            observations = self._prompt_facts(history_facts, current_facts, trend_facts, graph_ctx)
 
         # Wide candidate pool before reranking, not just top_k*2: a
         # specific patient fact (one line, narrow match) competes against
@@ -167,9 +173,13 @@ class QAChain:
         # a new one (also verified live). Listed first so a patient fact
         # wins ties over a topically-similar reference chunk when both
         # score similarly informative.
+        # Graph retrieval adds the linked metrics' full history here too: with the verifier preferring an
+        # entailing chunk over contradictions, an older dated reading can now back a claim about it.
+        patient_facts = self._dedupe(
+            [(fact, [name] if name else []) for fact, name in current_facts] + (graph_ctx.readings if graph_ctx else [])
+        )
         patient_evidence = self._facts_to_chunks(
-            [fact for fact, _ in current_facts], source="patient_record",
-            filenames=[[name] if name else [] for _, name in current_facts],
+            [fact for fact, _ in patient_facts], source="patient_record", filenames=[names for _, names in patient_facts],
         )
         # A trend claim ("your LDL increased 29 points") is arithmetic on
         # two Observations, not something NLI can verify against a single
@@ -178,8 +188,9 @@ class QAChain:
         # can relabel a match here as DERIVED rather than SUPPORTED (see
         # ml/claims/verifier.py's docstring for why DERIVED can't be
         # implemented as an NLI-only distinction).
+        derived_facts = self._dedupe(trend_pairs + (graph_ctx.derived if graph_ctx else []))
         derived_evidence = self._facts_to_chunks(
-            trend_facts, source="patient_derived", filenames=[names for _, names in trend_pairs],
+            [fact for fact, _ in derived_facts], source="patient_derived", filenames=[names for _, names in derived_facts],
         )
         verification_pool = patient_evidence + derived_evidence + evidence
 
@@ -194,21 +205,22 @@ class QAChain:
         return ChatResponse(answer=answer, claims=verified, evidence=evidence)
 
     def _graph_facts(
-        self, need_history: bool,
-    ) -> tuple[list[str], list[tuple[str, str | None]], list[tuple[str, list[str]]]]:
-        """(history facts, (current fact, source filename) pairs, (trend fact, source filenames) pairs) from the graph, or three empty
-        lists if Neo4j is unreachable.
+        self, question: str, need_history: bool,
+    ) -> tuple[list[str], list[tuple[str, str | None]], list[tuple[str, list[str]]], GraphContext | None]:
+        """(history facts, (current fact, source filename) pairs, (trend fact, source filenames) pairs,
+        question-focused graph context) from the graph; empty lists and None if Neo4j is unreachable.
 
         The graph layer is documented (CLAUDE.md) as "not MVP-blocking" --
         a general question with no patient-specific content shouldn't
         502 the whole request just because Neo4j is down; it should just
-        lose the patient-specific/trend grounding for that turn. Fetched
-        together in one try/except (not one per call site) so a partial
-        graph outage can't leave observations/current_facts/trend_facts
-        in an inconsistent mix of real and empty. The trend query is only
-        computed once, reused for both the prompt-context `observations`
-        and the trend-claim verification pool below, instead of querying
-        the graph for the identical result twice.
+        lose the patient-specific/trend grounding for that turn. The base facts are fetched together
+        in one try/except (not one per call site) so a partial graph outage can't leave
+        current_facts/trend_facts in an inconsistent mix of real and empty. The trend query is only
+        computed once, reused for both the prompt context and the trend-claim verification pool.
+
+        Graph retrieval (ml/graph/graph_retrieval.py) is separate and optional: it returns None when
+        nothing in the question links to the records, and a failure there only loses the extra
+        longitudinal/relational/conflict facts, not the base ones.
         """
         history_facts: list[str] = []
         try:
@@ -218,8 +230,36 @@ class QAChain:
             trend_facts = get_trend_facts_with_sources(self._graph_client)
         except Exception as exc:  # noqa: BLE001 -- degrade, not crash; see docstring
             print(f"QAChain: graph unavailable, answering without patient-graph facts: {exc}")
-            return [], [], []
-        return history_facts, current_facts, trend_facts
+            return [], [], [], None
+        try:
+            graph_ctx = retrieve_graph_context(self._graph_client, question)
+        except Exception as exc:  # noqa: BLE001 -- optional leg; see docstring
+            print(f"QAChain: graph retrieval failed, continuing without it: {exc}")
+            graph_ctx = None
+        return history_facts, current_facts, trend_facts, graph_ctx
+
+    @staticmethod
+    def _prompt_facts(
+        history_facts: list[str], current_facts: list[tuple[str, str | None]], trend_facts: list[str],
+        graph_ctx: GraphContext | None,
+    ) -> list[str]:
+        """Patient facts for the generation prompt.
+
+        With graph retrieval: the linked entities' history and graph-derived sentences first, then the
+        latest-per-metric snapshot and trends so the model never loses the basics. Without it: the
+        full fact dump, as before.
+        """
+        if graph_ctx is None:
+            return history_facts + trend_facts
+        return list(dict.fromkeys(graph_ctx.prompt_lines() + [fact for fact, _ in current_facts] + trend_facts))
+
+    @staticmethod
+    def _dedupe(sourced: list[tuple[str, list[str]]]) -> list[tuple[str, list[str]]]:
+        """Drop repeated sentences (first occurrence wins) from a list of (sentence, source files)."""
+        seen: dict[str, list[str]] = {}
+        for sentence, files in sourced:
+            seen.setdefault(sentence, files)
+        return list(seen.items())
 
     @staticmethod
     def _facts_to_chunks(facts: list[str], source: str, filenames: list[list[str]] | None = None) -> list[Chunk]:

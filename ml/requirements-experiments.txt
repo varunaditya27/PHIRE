@@ -1,0 +1,5 @@
+# Only needed to re-run the benchmark/experiment scripts under ml/**/experiments and ml/rag/ingest/router_experiments;
+# not used by the running app, so kept out of the Docker images.
+sentence-transformers
+pypdf
+rapidocr-onnxruntime

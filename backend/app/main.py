@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import (
     router_chat,
     router_claims,
+    router_document_events,
     router_documents,
     router_evidence,
     router_health,
@@ -55,6 +56,7 @@ app.add_middleware(AuditMiddleware)
 
 app.include_router(router_health.router)
 app.include_router(router_documents.router)
+app.include_router(router_document_events.router)
 app.include_router(router_observations.router)
 app.include_router(router_search.router)
 app.include_router(router_chat.router)

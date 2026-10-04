@@ -58,17 +58,13 @@ def _parse_date_token(token: str) -> str | None:
     return None
 
 
-def find_document_date(text: str) -> str:
-    """Best-effort clinical date from the document's own text (e.g. "Date of Service: 01/03/2026").
+def extract_document_date(text: str) -> str | None:
+    """Clinical date from the document's own text (e.g. "Date of Service: 01/03/2026"), or None if there is none.
 
-    Skips a date-of-birth-labeled date (see _LABEL_EXCLUDE_RE) and takes
-    the first remaining date in document order that parses under a known
-    format (see _DATE_FORMATS, day-first for numeric dates per PHIRE's
-    Indian-audience convention). Falls back to today's date if none is
-    found or parses — an observation without any date is worse than one
-    dated at ingestion time, since the whole point of this graph is
-    time-series queries. Shared by medications.py/conditions.py too, not
-    just table-derived Observations.
+    Skips a date-of-birth-labeled date (see _LABEL_EXCLUDE_RE) and takes the first remaining date in
+    document order that parses under a known format (see _DATE_FORMATS, day-first for numeric dates
+    per PHIRE's Indian-audience convention). None means "unknown": callers that can ask the user
+    (the backend's document upload) do so rather than guessing.
     """
     for match in _DATE_TOKEN_RE.finditer(text):
         preceding = text[max(0, match.start() - 25) : match.start()]
@@ -77,4 +73,15 @@ def find_document_date(text: str) -> str:
         parsed = _parse_date_token(match.group())
         if parsed:
             return parsed
-    return date.today().isoformat()
+    return None
+
+
+def find_document_date(text: str) -> str:
+    """extract_document_date, falling back to today's date when none is found.
+
+    Used where nobody can be asked (the standalone ingestion CLI, table/prose builders): an observation
+    without any date is worse than one dated at ingestion time, since the graph exists for time-series
+    queries. The backend does NOT rely on this fallback for uploads: it flags the document so the user
+    can supply the real date, because a wrong "today" can make an old report look like the latest reading.
+    """
+    return extract_document_date(text) or date.today().isoformat()

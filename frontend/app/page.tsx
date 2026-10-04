@@ -4,11 +4,13 @@ import { useEffect, useState, useMemo } from "react";
 import { api, TimelineResponse, TimelineSeries, ObservationRead } from "@/lib/api";
 import { TimelineChart } from "@/components/timeline-chart";
 import { latestPerMetric, splitReading } from "@/lib/readings";
-import { Activity, Clock, FileText, AlertCircle } from "lucide-react";
+import Link from "next/link";
+import { Activity, Clock, FileText, AlertCircle, CalendarClock } from "lucide-react";
 
 export default function Dashboard() {
   const [timeline, setTimeline] = useState<TimelineResponse | null>(null);
   const [observations, setObservations] = useState<ObservationRead[]>([]);
+  const [needDate, setNeedDate] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,12 +19,14 @@ export default function Dashboard() {
       try {
         setLoading(true);
         // Try fetching both. If backend is empty, it might return empty arrays.
-        const [timelineData, obsData] = await Promise.all([
+        const [timelineData, obsData, docs] = await Promise.all([
           api.timeline.get(),
           api.observations.list(),
+          api.documents.list(),
         ]);
         setTimeline(timelineData);
         setObservations(obsData);
+        setNeedDate(docs.filter((d) => d.needs_date).length);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load dashboard data. Ensure backend is running.");
       } finally {
@@ -63,6 +67,17 @@ export default function Dashboard() {
         <h1 className="text-3xl tracking-tight text-foreground font-[family-name:var(--font-editorial)] font-medium">Patient Overview</h1>
         <p className="text-muted-foreground mt-1">Holistic view of health trends and recent observations.</p>
       </div>
+
+      {needDate > 0 && (
+        <Link
+          href="/documents"
+          className="flex items-center gap-2 rounded-lg border border-[var(--warning,#C79A2C)] bg-[var(--warning-soft,rgba(199,154,44,0.12))] p-3 text-sm text-foreground hover:opacity-90"
+        >
+          <CalendarClock className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+          {needDate === 1 ? "1 document needs a date" : `${needDate} documents need a date`} — its readings are shown at the
+          upload date until you confirm it. Add it on the Documents page.
+        </Link>
+      )}
 
       {error && (
         <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900 flex items-start">

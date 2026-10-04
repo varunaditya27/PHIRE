@@ -11,6 +11,8 @@ listed informally below. If `ml/` changes after this, treat this as a
 starting map, not a live contract — check the actual code for anything
 you're about to depend on precisely (function signatures, field names).
 
+**Updated 2026-10-05**: this doc now reflects the current `ml/` — graph retrieval (§1.1, §7), the two document extractors (§1.2, §2.1; lift on GPU, an Ollama vision model on CPU — see `docs/CPU_SETUP.md`), the date handling that asks the user (§5.9), batched fp16 claim verification, and the requirements split (§2.4). Where an older paragraph below is marked as superseded it is kept for the "why".
+
 **Updated 2026-08-25** (§1.1, §5): graph integration (`ml/graph/`) landed
 after this doc's original 2026-08-16 pass and changed `QAChain`'s cost/
 lifetime contract — re-read §1.1 if you read this doc before that date.
@@ -73,13 +75,17 @@ to add tens of seconds of pure model-load latency per turn.
 `chain.answer()` itself, per call, makes: one Ollama call (chat
 generation), one Ollama call (claim extraction, inside `ClaimExtractor`),
 and — unless you pass `observations=` explicitly to override the
-auto-fetch — three Neo4j reads (`get_patient_facts`,
-`get_current_patient_facts`, `get_trend_facts`, all against the single
-`Patient {id: "self"}` node per §3). If Neo4j is unreachable at call
-time, `answer()` raises (the Neo4j driver connects lazily on first query,
-not at `GraphClient()` construction) — there's no graceful degradation
-path today; decide at the backend layer whether a Neo4j outage should
-fail the whole chat request or fall back to `observations=[]`.
+auto-fetch — a handful of Neo4j reads against the single
+`Patient {id: "self"}` node (§3): the full facts, the current facts with
+their source files, the trend facts, and **graph retrieval**
+(`ml/graph/graph_retrieval.py`), which links the question to metrics,
+medications and conditions, follows one hop between them, and adds the
+linked metrics' full history, change summaries and any conflicting records
+(§7). When nothing in the question links, graph retrieval returns `None` and
+the prompt is the full fact dump, as before. If Neo4j is unreachable,
+`answer()` **degrades**: the graph facts are skipped (logged) and the question is
+answered from the evidence passages alone — it no longer raises. A failure inside
+graph retrieval alone only loses the extra facts, not the base ones.
 
 Patient/trend facts pulled into claim verification are capped at 50 each
 (`ml.chains.qa_chain.MAX_FACT_EVIDENCE`) — a defensive ceiling on NLI
@@ -96,8 +102,10 @@ from ml.rag.ingest.patient_documents import extract_document_data
 from ml.rag.ingest.ingest_patient_document import build_chunks
 from ml.rag.retriever import HybridRetriever
 
-# 1. Extract structured clinical data via Lift VLM (single pass)
-data = extract_document_data(Path("/path/to/uploaded/file.pdf"))  # digital PDF, scanned PDF, or image
+# 1. Extract structured clinical data in one pass (digital PDF, scanned PDF, or image).
+#    The default extractor is lift; pass extractor=OllamaVisionExtractor() on a machine without a CUDA
+#    GPU. The backend picks one for you: app.services.ml_singletons.get_extractor() (PHIRE_EXTRACTOR=auto|lift|ollama).
+data = extract_document_data(Path("/path/to/uploaded/file.pdf"))
 
 # 2. Build Option A declarative clinical sentence chunks and index into Chroma/BM25
 chunks = build_chunks(Path("/path/to/uploaded/file.pdf"), data=data, document_id="doc123")
@@ -114,6 +122,8 @@ ml/.venv/bin/python -m ml.rag.ingest.ingest_patient_document /path/to/file.pdf
 
 Accepts: digital PDFs, scanned PDFs (no embedded text layer), and images (`.jpg`, `.jpeg`, `.png`, `.webp`).
 
+**Dates**: if no clinical date can be extracted, use `ml.graph.document_dates.extract_document_date`, which returns `None` (it does not guess); `find_document_date` is the same function with a today-fallback for callers who cannot ask anyone. The backend uses the former, flags the document `needs_date`, and rebuilds it at the date the user supplies (`docs/API_REFERENCE.md`, `PUT /api/documents/{id}/date`).
+
 ---
 
 ## 2. Infrastructure this depends on
@@ -126,7 +136,7 @@ Production model requirement:
 |---|---|---|
 | Chat generation | `medgemma:4b` | `OLLAMA_MODEL` |
 
-Visual document extraction uses `datalab-to/lift` (9.7B VLM, 18GB in bf16), loaded in-process via Hugging Face with **4-bit NF4 quantization on CUDA** and a CPU fallback (`LIFT_MODEL`, `LIFT_DEVICE`, `PHIRE_MOCK_LIFT`). Measured on the 8GB RTX 5050: ~56s to load, ~6GiB resident, 6.5GiB peak, ~37s to extract a one-page lab report, all values correct.
+Visual document extraction uses `datalab-to/lift` (9.7B VLM, 18GB in bf16), loaded in-process via Hugging Face with **4-bit NF4 quantization on CUDA** (`LIFT_MODEL`, `LIFT_DEVICE`, `PHIRE_MOCK_LIFT`). There is deliberately **no CPU path for lift** (18GB of weights, minutes per page). Machines without a CUDA GPU use `OllamaVisionExtractor` instead — page images plus the PDF's text layer sent to a multimodal Ollama model (`medgemma:4b` by default, `OLLAMA_VISION_MODEL` to change) with the clinical schema as Ollama's schema-constrained `format`; ~110–135s per page on a Ryzen 7 260 CPU, same accuracy on the test documents. See `docs/CPU_SETUP.md`. Measured on the 8GB RTX 5050: ~56s to load, ~6GiB resident, 6.5GiB peak, ~37s to extract a one-page lab report, all values correct.
 
 **How quantization is actually applied (important):** lift's `InferenceManager.__init__` accepts *only* `method` — it silently ignores/rejects `quantization_config`/`device` kwargs and always loads bf16. `LiftExtractor._get_model()` therefore builds the NF4 model itself with `AutoModelForImageTextToText.from_pretrained(..., quantization_config=BitsAndBytesConfig(load_in_4bit, nf4, double-quant, bf16 compute, llm_int8_skip_modules=["visual"]), device_map={"": 0})`, then injects it into an `InferenceManager(method="vllm")` (which skips lift's own loader) by setting `.method="hf"` and `.model`. An earlier version passed the kwargs to `InferenceManager` inside `try/except TypeError` and silently fell back to the unquantized bf16 load, which spilled the model into CPU RAM; there is deliberately **no such fallback now** — a failed 4-bit load raises. The vision tower stays bf16. `PHIRE_MOCK_LIFT` is read at call time, and `LiftExtractor` frees its weights after every document (`_release_model`).
 
@@ -148,12 +158,11 @@ released in 4B and 27B sizes by Google — the docs' originally-referenced
 "8b-q4_0" tag doesn't exist). If you're setting up Ollama serving from
 scratch, pull `medgemma:4b`, not whatever the older docs say.
 
-### 2.2 Neo4j (new — not yet in your docker-compose.yml)
+### 2.2 Neo4j
 
-This is genuinely new infrastructure you don't have yet. `ml/graph/`
-writes structured patient facts (labs, medications, conditions) here.
-Currently running as a **standalone dev container**, not part of any
-docker-compose setup:
+`ml/graph/` writes structured patient facts (labs, medications, conditions) here.
+It is part of `docker/docker-compose.yml` (published on `127.0.0.1` only). For
+running `ml/` on its own, a standalone dev container works identically:
 
 ```bash
 podman run -d --name phire-neo4j \
@@ -164,9 +173,9 @@ podman run -d --name phire-neo4j \
 ```
 
 (`docker run` with the same flags works identically if you're using
-Docker instead of podman.) You'll want to fold this into
-`docker/docker-compose.yml` properly rather than leave it as a manual
-container — this was stood up for development, not deployment.
+Docker instead of podman.) Do not point tests or tools at a Neo4j that
+belongs to another project on the same machine — set `NEO4J_URI` /
+`NEO4J_PASSWORD` explicitly.
 
 Config via `NEO4J_URI` (default `bolt://localhost:7687`), `NEO4J_USER`,
 `NEO4J_PASSWORD` — see `ml/graph/client.py`. Same localhost-only
@@ -180,8 +189,9 @@ ingestion scripts, not source).
 
 ### 2.4 Python environment
 
-`ml/.venv`, Python 3.12, managed via `uv`. `ml/requirements.txt` has
-everything pinned. `ml/.env.example` → copy to `ml/.env` for local
+`ml/.venv`, Python 3.12 (lift-pdf requires it), managed via `uv`. Requirements are split: `ml/requirements.txt` is the CPU-safe base,
+`ml/requirements-lift.txt` the GPU-only extra (lift, bitsandbytes, accelerate), and `ml/requirements-experiments.txt` only needed to re-run benchmarks.
+Versions are not pinned (unpinned `torch`, `transformers`, ...). `ml/.env.example` → copy to `ml/.env` for local
 secrets (USDA/NCBI API keys, Neo4j credentials) — never commit `ml/.env`.
 
 ---
@@ -256,8 +266,8 @@ in that case, not a wrong guess. Check for `None` before using it.
    To support this, `EmbeddingModel`, `Reranker`, `ClaimVerifier` and
    `HybridRetriever` each expose `move_to(device)` (weights parked in CPU RAM,
    ~1s to restore) and track their device per instance instead of the old
-   module-level `_DEVICE`. On CPU/non-CUDA setups Lift loads through lift's
-   default loader with `TORCH_DEVICE="cpu"`, no quantization.
+   module-level `_DEVICE`. On CPU-only machines there is no GPU to arbitrate and
+   lift is not used at all (see §2.1).
 2. **INFERRED is not implemented; DERIVED is, one layer up.**
    `ClaimVerifier` itself only returns `SUPPORTED`/`CONFLICTING`/`UNCERTAIN`/
    `UNSUPPORTED`; `QAChain` relabels a SUPPORTED match against a precomputed
@@ -272,9 +282,12 @@ in that case, not a wrong guess. Check for `None` before using it.
    the true 0.99-entailing fact and flip correct patient-record claims to
    `CONFLICTING`. Trade-off: a claim that is entailed by one chunk but
    genuinely contradicted by another now reports SUPPORTED.
-3. **Scanned PDFs and image-based documents are fully supported** —
-   `datalab-to/lift` visual extraction natively processes scanned PDFs,
-   photos, and digital PDFs alike into unified structured schema output.
+3. **Scanned PDFs and image-based documents are supported by both extractors**
+   — lift natively processes scanned PDFs, photos and digital PDFs; the CPU
+   vision extractor handles them too, but a 4B model is less robust on
+   noisy scans (on the test scan it missed one medication and one diagnosis),
+   and digital PDFs are its best case because their text layer is passed to
+   the model. Document dates: see §5.9.
 4. **The cross-encoder reranker is sensitive to phrasing** in ways that
    might surprise you: "what was my LDL cholesterol result?" and "What is
    my LDL cholesterol result?" (same meaning) scored measurably
@@ -284,7 +297,11 @@ in that case, not a wrong guess. Check for `None` before using it.
    queries, don't.
 5. **USDA ingestion needs a real API key** (`USDA_API_KEY`) — the free
    `DEMO_KEY` default hits its rate limit almost immediately (confirmed
-   live, not just documented).
+   live, not just documented). USDA chunks are rendered as natural-language
+   sentences with FDA "high / good source" statements (the old terse
+   key-value form scored poorly against conversational claims); an
+   already-seeded corpus can be upgraded offline, with no API calls, using
+   `python -m ml.rag.ingest.reformat_corpus` (idempotent; stop the backend first).
 6. **No retry/backoff on external API calls** (PubMed, MedlinePlus, USDA)
    beyond what's already in `ml/rag/ingest/run_ingest.py` (per-topic
    failure is logged and skipped, not retried).
@@ -308,8 +325,7 @@ in that case, not a wrong guess. Check for `None` before using it.
    doesn't distinguish "real" from "test" data on its own, and there's no
    automatic cleanup.
 9. **Document dates: day-first (DD/MM/YYYY), not US month-first, and DOB
-   is deliberately excluded.** `ml/graph/observations.py`'s
-   `find_document_date` parses ambiguous numeric dates day-first —
+   is deliberately excluded.** `ml/graph/document_dates.py`'s `extract_document_date` / `find_document_date` parse ambiguous numeric dates day-first —
    PHIRE's primary audience is Indian users/clinics, where that's the
    normal convention, so `"03/01/2026"` means 3 January, not March 1st.
    It also explicitly skips any date immediately labeled `DOB`/`Date of
@@ -338,6 +354,10 @@ this doc:
 - `docs/GRAPH_SCHEMA_ROADMAP.md` — what's deliberately deferred in the graph schema, and the trigger condition for each
 
 
-## 6. Composite readings (added 2026-10-04)
+## 7. Composite readings and graph retrieval (added 2026-10-04 / 2026-10-05)
+
+**Graph retrieval** (`ml/graph/graph_retrieval.py`, `relations.py`, `conflicts.py`): `retrieve_graph_context(client, question)` returns a `GraphContext` — `readings` (stored facts of the linked entities, each with its source files), `derived` (graph-computed sentences: overall-change summaries, "<medication> … is followed through <metric> (<series>)", conflicting-records statements), and `linked` (what matched) — or `None` when nothing links. `QAChain` uses it to focus the prompt and to add those sentences to the verification pool, so a claim built on them is `DERIVED` and cites every file involved. The drug/condition → metric table in `relations.py` is a retrieval hint, not a medical claim. Conflicts are only same-fact/same-date disagreements between different documents. Design and limits: `docs/GRAPH_SCHEMA_ROADMAP.md` §3f.
+
+### Composite readings
 
 `ml/graph/composite_readings.py` is a small registry for single values that are really several numbers, applied by `build_lift_observations`: blood pressure `148/92 mmHg, pulse 74` → `Blood Pressure (Systolic)`, `(Diastolic)` and `Heart Rate` observations (the compound text observation is kept for display/NLI); Snellen acuity `20/40` → decimal `0.5` stored on the observation itself; height `5'9"` → `175.3 cm`. Matching is on the base name, so `Visual acuity (right eye)` / `Blood Pressure (sitting)` match and the qualifier is preserved on derived names (each eye/posture stays its own series). Anything unregistered — ratios like `A/G 1.2/1`, dates — is left untouched on purpose; add a handler + dict entry to support a new shape. HbA1c `6.1 % (43 mmol/mol)` is one observation (the first number), not split.

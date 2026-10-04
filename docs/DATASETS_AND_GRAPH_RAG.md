@@ -91,7 +91,7 @@ Three-way hybrid retrieval, routed by question shape:
 
 1. **Lexical (BM25)** — exact term/value matches ("LDL", "142 mg/dL").
 2. **Semantic (Chroma vector search)** — paraphrase and similarity matches, single-document lookups.
-3. **Graph traversal (LightRAG over Neo4j)** — multi-hop, relational, and longitudinal questions; also the natural mechanism for surfacing conflicting records, since a graph edge can encode `conflicts_with` or `supersedes` explicitly instead of relying on a re-ranking heuristic.
+3. **Graph traversal over Neo4j** — multi-hop, relational, and longitudinal questions; also the mechanism for surfacing conflicting records. **Implemented 2026-10-05 as deterministic Cypher traversal** (`ml/graph/graph_retrieval.py`, `relations.py`, `conflicts.py`), *not* with LightRAG: conflicts are detected by comparing stored rows (same fact, same date, different documents) rather than via LLM-built `conflicts_with` edges. See `docs/GRAPH_SCHEMA_ROADMAP.md` §3f.
 
 A useful side effect for the nutrition/fitness recommendation layer specifically: connecting `Observation` nodes (lab values, logged meals, activity sessions) to `Recommendation` nodes via explicit `supports` / `contraindicated_by` edges gives evidence attribution "for free" — the edge itself *is* the provenance link, consistent with PHIRE's core claim-to-evidence design rather than bolted on separately for recommendations.
 
@@ -99,7 +99,7 @@ A useful side effect for the nutrition/fitness recommendation layer specifically
 
 - `ml/rag/retriever.py` — updated to describe the three-way hybrid (see file).
 - `ml/requirements.txt` — `neo4j` is now a live dependency (not commented/candidate) — `ml/graph/` implements the deterministic half of this (Observation extraction from OCR'd tables), ahead of the original Month 2-3 timeline. `lightrag-hku` remains a candidate, not adopted — see below.
-- **Status update**: the deterministic table-extraction slice of Graph RAG was built and live-tested earlier than planned (patient documents needed OCR + structured extraction regardless of the broader graph-RAG timeline). This does **not** mean the full graph-RAG leg (LightRAG entity/relationship extraction from free text, multi-hop retrieval routing) is done — see `docs/GRAPH_SCHEMA_ROADMAP.md` for exactly what's built vs. deferred, and why the broader clinical-KG architecture patterns (ontology alignment, claim provenance as graph edges, additional node types) are deliberately not being adopted yet at PHIRE's current single-user, single-pipeline scale.
+- **Status update (2026-10-05)**: the graph leg is built — structured extraction into Neo4j (earlier), and now question-focused retrieval with entity linking, one-hop expansion, longitudinal summaries and conflict detection. `lightrag-hku` was evaluated and **not adopted** (an LLM-built entity graph adds a dependency and a model re-interpreting patient text; the needed relationships are already structured). What remains deliberately deferred — ontology alignment, claim provenance as graph edges, additional node types, and a single traversal that walks from the patient graph into a guideline passage in Chroma — is tracked, with trigger conditions, in `docs/GRAPH_SCHEMA_ROADMAP.md`.
 
 ---
 

@@ -83,7 +83,7 @@ The core Q&A endpoint: retrieval → cross-encoder rerank → LLM answer generat
 }
 ```
 - `claims[].status` is one of `SUPPORTED`, `DERIVED`, `INFERRED`, `UNCERTAIN`, `CONFLICTING`, `UNSUPPORTED`.
-  - `DERIVED`: Claim matched a precomputed trend fact from the Longitudinal Health Graph.
+  - `DERIVED`: Claim matched a fact the graph computed — a latest-vs-previous trend, an overall-change summary across all readings, a medication/condition → metric link, or a conflicting-records statement. Its `source_filenames` lists every document involved.
   - `SUPPORTED`: Claim was entailed by a retrieved document chunk or knowledge base passage.
   - `CONFLICTING`: Claim contradicted retrieved evidence.
   - `UNSUPPORTED`: Claim had no supporting evidence or confidence below `ABSTENTION_THRESHOLD` (0.4).
@@ -101,7 +101,7 @@ Events, in order:
 | `result` | the full `ChatResponse` (same shape as above) | Terminal — the answer |
 | `error` | `{"message": "..."}` | Terminal — pipeline failed (the non-stream endpoint returns `502` instead; the assistant error turn is still persisted) |
 
-Stages: `start` (question received), `gpu_wait` (another GPU task holds the lock), `gpu` (loading the chat-group models onto the GPU — only when the GPU was last used by lift, or on the very first request after startup), `graph` (reading the patient's graph facts), `retrieve`, `generate` (local LLM draft), `extract` (claim splitting), `verify` (one event per claim: "Verifying claim i of n"). `gpu_wait`/`gpu` appear only when applicable.
+Stages: `start` (question received), `gpu_wait` (another GPU task holds the lock), `gpu` (loading the chat-group models onto the GPU — only when the GPU was last used by lift, or on the very first request after startup), `graph` (reading the patient's graph facts; a second `graph` event, "Following links in your health graph: …", is sent when the question links to metrics, medications or conditions and graph retrieval kicks in), `retrieve`, `generate` (local LLM draft), `extract` (claim splitting), `verify` (one event per claim: "Verifying claim i of n"). `gpu_wait`/`gpu` appear only when applicable.
 
 ```
 event: progress
@@ -153,9 +153,20 @@ Queries document status and processing metadata.
   "status": "processed",             // "uploaded" | "processing" | "processed" | "failed"
   "uploaded_at": "2026-09-03T12:00:00Z",
   "processed_at": "2026-09-03T12:00:15Z",
-  "error_message": null
+  "error_message": null,
+  "document_date": "2026-03-12",     // clinical date applied to this document's facts (ISO); provisional while needs_date is true
+  "needs_date": false                // true: no date could be extracted -> ask the user, then PUT /{id}/date
 }
 ```
+
+### `PUT /api/documents/{document_id}/date`
+Supply (or correct) a document's clinical date. The backend keeps each document's structured extraction, so this **rebuilds the document's graph facts and search chunks at the given date in seconds** (no re-run of the vision model) and clears `needs_date`. Used when processing finished but no date could be found: instead of silently assuming today (which can make an old report look like the latest reading), the document is saved with a provisional upload date, `needs_date: true`, and the final SSE message is `"Done -- this document needs a date"`.
+
+**Request**: `{"document_date": "2026-03-12"}` (ISO date; a future date is rejected).
+**Response**: the updated `DocumentRead`.
+- `422` for a malformed or future date.
+- `404` unknown id; `409` if the document is not `processed` yet.
+- `409` with guidance (delete and upload again) for a document processed before extractions were saved — it has nothing to rebuild from.
 
 ### `DELETE /api/documents/{document_id}`
 Removes a document everywhere it was written: its Chroma chunks, its Neo4j facts (observations, medications, conditions, the `Document` node), the stored file, and the Postgres row. `204` on success; `404` unknown id; `409` while the document is still `processing`. Cleanup errors are **not** swallowed (the endpoint returns `500` and keeps the row so you can retry) — a "deleted" document whose facts still answer chat would be a silent privacy failure.
@@ -163,7 +174,7 @@ Removes a document everywhere it was written: its Chroma chunks, its Neo4j facts
 ### `GET /api/documents/{document_id}/events` (SSE)
 Live ingestion progress for one document. `Content-Type: text/event-stream`; browser `EventSource` works (GET). Replays every event published so far, then streams new ones, and closes after the terminal event — so connecting late or reconnecting never misses a stage. A `: keep-alive` comment is sent every 15s of silence.
 
-Each frame is `event: progress` with `data: {"stage": "...", "message": "..."}`. Stages, in order: `queued`, `gpu_wait` (only if another GPU task is running), `gpu` (loading vision models onto the GPU — evicts the chat models), `extract` (lift reading the document, ~1 min), `index` (embedding passages — loads chat models back), `graph` (writing labs/medications/conditions), then terminal `processed` (message `"Done"`) or `failed` (message = the error text). Returns `404` for an unknown id. History lives in backend memory: for a document with none (e.g. after a backend restart) the stream emits one event carrying its stored status and closes.
+Each frame is `event: progress` with `data: {"stage": "...", "message": "..."}`. Stages, in order: `queued`, `gpu_wait` (only if another GPU task is running), `gpu` (loading vision models onto the GPU — evicts the chat models; only sent when a GPU exists and the lift group is entered), `extract` (the vision model reading the document — lift ~1 min on a GPU, ~2 min per page on a CPU), `index` (embedding passages — loads chat models back), `graph` (writing labs/medications/conditions), then terminal `processed` (message `"Done"`, or `"Done -- this document needs a date"`) or `failed` (message = the error text). Returns `404` for an unknown id. History lives in backend memory: for a document with none (e.g. after a backend restart) the stream emits one event carrying its stored status and closes.
 
 ### `GET /api/documents`
 All uploaded documents, newest first (`DocumentRead[]`, same shape as `GET /{document_id}`). The documents page uses this as its source of truth (no more `localStorage`).

@@ -52,7 +52,7 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
   base-model pick and kept.
 - **Integration**: `ollama pull medgemma:4b` (~2.5GB quantized)
 - **PHIRE Role**: Primary clinical LLM for chat generation and claim extraction (`ml/claims/extractor.py`)
-- **Also in use**: `qwen3.5:9b` for prose fact extraction (medications/conditions/observations from free text) — chosen over `medgemma:4b` after a head-to-head benchmark, see item 8a below
+- **Also**: `medgemma:4b` is multimodal, and doubles as the CPU-only document reader (`ml/rag/ingest/ollama_extractor.py`, item 14c). `qwen3.5:9b` was used for prose fact extraction until `datalab-to/lift` replaced that stage (2026-09-09); it is **no longer used** (benchmark history: item 8a)
 
 **3. Llama 2 / Llama 3.1**
 - **GitHub**: [meta-llama/llama](https://github.com/meta-llama/llama)
@@ -178,7 +178,7 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
   relative to my statin dose changes"); a graph makes those chains
   traversable instead of hoping embedding similarity surfaces them.
 
-**9a. LightRAG** — *Evaluated as the graph-RAG library, NOT adopted; the capability itself is still needed (corrected 2026-08-26)*
+**9a. LightRAG** — *Evaluated as the graph-RAG library, NOT adopted; the capability itself was built without it (2026-10-05)*
 - **GitHub**: [HKUDS/LightRAG](https://github.com/HKUDS/LightRAG) · **Paper**: EMNLP 2025
 - **License**: MIT
 - **Functionality**: Graph-based RAG with local entity/relationship
@@ -192,18 +192,16 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
   instead — deterministic table extraction plus schema-constrained LLM
   extraction from free text, both of which don't need a general-purpose
   graph-RAG library.
-- **Important distinction, corrected 2026-08-26**: "LightRAG not adopted"
-  is a decision about *which library*, not about *whether multi-hop
-  graph-RAG retrieval gets built*. It doesn't exist yet in any form —
-  `ml/graph/` today is single-patient fact *lookup* (current value per
-  metric, latest-vs-previous trend delta via
-  `ml/graph/patient_context.py`), not traversal of relationships
-  *between* entities at query time. This is **outstanding, committed
-  work**, not a dismissed option — see
-  [docs/GRAPH_SCHEMA_ROADMAP.md](GRAPH_SCHEMA_ROADMAP.md) §3f for the
-  detailed status. Revisit LightRAG itself (or an alternative) when that
-  work actually starts; `lightrag-hku` is commented out, not deleted, in
-  `ml/requirements.txt` with this exact framing.
+- **Outcome (2026-10-05)**: "LightRAG not adopted" was a decision about *which
+  library*, and the capability it was evaluated for has since been **built
+  without it**: `ml/graph/graph_retrieval.py` does deterministic, question-focused
+  traversal of the Neo4j graph (entity linking, one hop between medications /
+  conditions / metrics via a curated table, full-history and change summaries,
+  conflicting-record detection). The relationships needed are already structured
+  (dates, values, source documents), so an LLM-built entity graph would only add
+  a dependency and a second place for patient text to be re-interpreted. See
+  [docs/GRAPH_SCHEMA_ROADMAP.md](GRAPH_SCHEMA_ROADMAP.md) §3f for scope and limits.
+  `lightrag-hku` is no longer mentioned in `ml/requirements.txt`.
 
 **9b. Neo4j (graph store)** — *Adopted*
 - **GitHub**: [neo4j/neo4j](https://github.com/neo4j/neo4j)
@@ -249,10 +247,8 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 **13. PyMuPDF (fitz)** — *Not adopted*
 - **License**: AGPL (proprietary option available)
 - **Functionality**: PDF extraction fallback
-- **Status**: not needed — pypdf covers the text-based-PDF case; a
-  scanned PDF with no text layer is a known, documented gap (see
-  `docs/PDF_INGESTION_ROADMAP.md`), not something PyMuPDF would solve
-  differently.
+- **Status**: not needed — text-layer reading is done with `pypdfium2` (a lift dependency, also used directly by the Ollama vision extractor), and scanned PDFs are handled by the vision extractors (the historical router design is in
+  `docs/PDF_INGESTION_ROADMAP.md`).
 - **Why PHIRE**: Fast, lightweight — kept here as a fallback option if pypdf's extraction quality is ever found lacking on a real document
 
 **14. Tesseract OCR** — *superseded, see below*
@@ -278,7 +274,12 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 - **License**: Apache 2.0
 - **Functionality**: 9.7B parameter vision-language model purpose-built for schema-guided visual document extraction. Directly compiles a JSON schema into token-level decoding grammars to emit guaranteed-valid structured JSON from multi-page PDFs and images in a single pass.
 - **PHIRE Role**: Core document extractor (`ml/rag/ingest/lift_extractor.py`, `ml/rag/ingest/lift_schema.py`). Extracts observations, reference ranges, interpretations/flags, medications, and conditions directly into structured records for Neo4j and Option A RAG sentence synthesis.
-- **Deployment**: In-process via Hugging Face (`lift-pdf[hf]`). Runs 4-bit NF4 quantization on CUDA via `BitsAndBytesConfig` (~6GB VRAM footprint under `GPU_LOCK`), with graceful CPU execution (`torch.float32`) on non-CUDA machines and deterministic mock execution via `PHIRE_MOCK_LIFT=true`.
+- **Deployment**: In-process via Hugging Face (`lift-pdf[hf]`, GPU-only extra in `ml/requirements-lift.txt`). `LiftExtractor` builds the 4-bit NF4 model itself with `BitsAndBytesConfig` (lift's own `InferenceManager` ignores quantization options and always loads bf16); ~6.5GiB peak on an 8GB GPU under `gpu_mode(LIFT)`, weights freed after each document. **There is no CPU path for lift** — machines without a CUDA GPU use the Ollama vision extractor (entry 14c). Deterministic mock execution via `PHIRE_MOCK_LIFT=true`.
+
+**14c. Ollama vision model (`medgemma:4b`) as the CPU-only document reader** — *Adopted (2026-10-05)*
+- **Functionality**: A multimodal model served by the local Ollama, given each page image plus the PDF's text layer and the clinical JSON schema as Ollama's schema-constrained (`format`) output.
+- **PHIRE Role**: `ml/rag/ingest/ollama_extractor.py`, used when no CUDA GPU is present (`PHIRE_EXTRACTOR=auto|lift|ollama`). Same schema and downstream pipeline as lift. Measured ~110–135s per page on a Ryzen 7 260 CPU with the same accuracy on the test documents; a 4B model is less robust than lift on noisy scans. See `docs/CPU_SETUP.md`.
+- **Why**: it needs no extra download (`medgemma:4b` already answers chat) and no extra service.
 
 ---
 
@@ -583,20 +584,19 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 
 ### Core (`ml/` — implemented)
 ✅ Adopted:
-- Ollama (medgemma:4b chat/claim extraction)
-- datalab-to/lift (9.7B VLM for schema-guided visual document extraction)
+- Ollama (medgemma:4b chat/claim extraction; also the CPU-only document reader)
+- datalab-to/lift (9.7B VLM for schema-guided visual document extraction, GPU machines)
 - Chroma, MedCPT (embeddings + cross-encoder reranking), rank_bm25
-- BART-large-MNLI (claim verification), Neo4j (direct Cypher, not LightRAG)
+- BART-large-MNLI (claim verification, batched, fp16 on CUDA), Neo4j (direct Cypher, not LightRAG)
 - PyTorch, scikit-learn (available; not yet used for recommendations)
 
 ❌ Not adopted (evaluated, see entries above for why): LangChain, MedRAGChecker, Docling, olmOCR-v2 (superseded by Lift)
 
 ### Built (backend/frontend scope)
-- FastAPI, PostgreSQL, Docker Compose, Next.js — fully built and integrated
+- FastAPI, PostgreSQL, Docker Compose (GPU and CPU variants), Next.js — fully built and integrated
 
 ### Phase 2
 ➕ Add:
-- Multi-hop graph-RAG retrieval (LightRAG or an alternative — see item 9a; **outstanding, not optional**, see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f)
 - MEGA-RAG
 - YOLOv8/EfficientNet-B0 (Food-101 classification backbone), MediaPipe Pose
 - Open Wearables (prep)
@@ -634,7 +634,7 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 | Docling | MIT | ✅ | Yes | ❌ not adopted |
 | LangChain | MIT | ✅ | Partial (requires Ollama) | ❌ not adopted |
 | MedRAGChecker | Apache 2.0 (claimed by paper) | ✅ | Yes (local) | ❌ not adopted — not pip-installable |
-| LightRAG | MIT | ✅ | Yes (local via Ollama) | ❌ not adopted as a library; the capability (multi-hop graph-RAG) is still outstanding, see item 9a |
+| LightRAG | MIT | ✅ | Yes (local via Ollama) | ❌ not adopted as a library; the capability was built without it (deterministic graph retrieval), see item 9a |
 | MediaPipe | Apache 2.0 | ✅ | Yes (local) | Not yet (CV extension) |
 | YOLOv8 | AGPL | ⚠️ | Yes (with license) | Not yet (CV extension) |
 | PyTorch | BSD | ✅ | Yes | ✅ (RAG/claims); not yet used for recommendations |
@@ -668,7 +668,7 @@ Consider contributing back:
 | Paper | Title | Relevance |
 |-------|-------|-----------|
 | 2025 | MedRAGChecker | Original inspiration for claim verification — **not adopted** (not installable); PHIRE built its own NLI-based verifier instead, see item 8 |
-| 2025 | Medical Graph RAG | Entity-aware retrieval — conceptual basis for the graph-RAG leg, which is **not yet implemented**, see item 9a |
+| 2025 | Medical Graph RAG | Entity-aware retrieval — conceptual basis for the graph-RAG leg, now **implemented** as deterministic Cypher traversal (`ml/graph/graph_retrieval.py`), see item 9a |
 | 2025 | MEGA-RAG | Hallucination reduction |
 | 2024 | VISA | Visual source attribution |
 | 2024 | MedHallBench | Hallucination detection |
@@ -692,7 +692,7 @@ Consider contributing back:
 - [x] FastAPI endpoints wired to `ml/` (backend scope, fully integrated)
 - [x] PostgreSQL schema with SQLAlchemy & Alembic migrations
 - [x] Docker Compose full-stack services defined
-- [ ] Multi-hop graph-RAG retrieval (LightRAG or alternative) — **outstanding, not yet started**, see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f
+- [x] Multi-hop / longitudinal graph retrieval — **built 2026-10-05** without LightRAG (`ml/graph/graph_retrieval.py`), see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f
 - [ ] MediaPipe Pose (CV extension, not started)
 - [ ] YOLOv8 (CV extension, not started)
 - [ ] Open Wearables docs reviewed (not started)

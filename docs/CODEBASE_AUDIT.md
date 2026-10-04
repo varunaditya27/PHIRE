@@ -1,8 +1,25 @@
 # PHIRE Codebase Audit: Features, Inconsistencies, Bugs, and Architectural Decisions
 
-**Audit Date**: September 3, 2026  
+**Audit Date**: September 3, 2026 (a point-in-time record; resolution status added 2026-10-05)  
 **Audited Subsystems**: `frontend/`, `backend/`, `ml/`, `docker/`, `scripts/`, `docs/`  
 **Workspace**: `/home/varun/Projects/PHIRE`
+
+> **Resolution status (2026-10-05).** This audit describes the repository as of 2026-09-03. Since then every finding below was fixed except the ones marked *open*. §1–§2's descriptions are the *historical* state (e.g. "8 routers" — there are now 9, "multi-series charts" — now one chart per unit); the live description is in `README.md`, `docs/BACKEND_HANDOFF.md` and `docs/BACKLOG.md`.
+>
+> | Finding | Status | Where |
+> |---|---|---|
+> | 2.2.1 Recommendations are stubs | **Open** (deliberately postponed) | `ml/recommendations/` |
+> | 2.2.2 Multi-hop graph retrieval | **Done** (2026-10-05) | `ml/graph/graph_retrieval.py`, `docs/GRAPH_SCHEMA_ROADMAP.md` §3f |
+> | 2.2.3 Scanned PDFs | **Done** | lift (GPU) / Ollama vision extractor (CPU) |
+> | 2.2.4 / 2.2.5 No document list / chat history endpoints | **Done** | `GET /api/documents`, `GET /api/chat/messages` |
+> | 2.2.6 No backend/frontend tests | **Partly** — backend services/endpoints are covered by tests in `ml/tests/`; there is no `backend/tests/`, no router tests for chat/search, and no frontend tests | `docs/BACKLOG.md` |
+> | 2.2.7 `evaluation/` missing | **Open** (Shashwati's) | — |
+> | 3.1 `score` always `None` | **Done** | `[0.7.1]` |
+> | 3.2 / 3.4 Frontend type mismatches | **Done** | `[0.7.3]`, `[0.8.1]` |
+> | 3.3 Redundant `/process` call | **Done** | `[0.7.0]` |
+> | 4.1–4.4 Docker findings | **Done** (plus a dozen more found in `[0.8.0]`) | `CHANGELOG.md` |
+> | 4.5 Unbatched verifier | **Done** (batched, fp16) | `[0.7.4]`, `[0.7.5]` |
+> | 4.6 Compound metrics | **Done** (BP+pulse, Snellen acuity, feet-inches height) | `ml/graph/composite_readings.py` |
 
 ---
 
@@ -42,15 +59,15 @@ This comprehensive audit surfaces all implemented features, remaining functional
 1. **Recommendations Subsystem (`ml/recommendations/*`)**:
    - `ml/recommendations/fitness/` (`har_model.py`, `recommendations.py`) and `ml/recommendations/nutrition/` (`meal_generator.py`, `model.py`) are research-note stubs.
    - `GET /api/recommendations/fitness` and `GET /api/recommendations/nutrition` return `501 Not Implemented`.
-2. **Multi-Hop Graph-RAG Retrieval**:
+2. **Multi-Hop Graph-RAG Retrieval** *(done 2026-10-05 — see the status table above)*:
    - Query-time relational entity graph traversal (e.g., cross-referencing medication dose changes directly against observation deltas) is documented in [`docs/GRAPH_SCHEMA_ROADMAP.md`](file:///home/varun/Projects/PHIRE/docs/GRAPH_SCHEMA_ROADMAP.md) but unbuilt.
 3. **Scanned PDF Fallback Router (RESOLVED)**:
    - **Resolved by `datalab-to/lift` integration**: The 9.7B parameter VLM performs unified single-pass visual document extraction directly on both native digital PDFs and scanned image-only PDFs/photos, rendering OCR routing workarounds obsolete.
-4. **Backend Document Listing Endpoint (`GET /api/documents`)**:
+4. **Backend Document Listing Endpoint (`GET /api/documents`)** *(done)*:
    - No route exists to query all uploaded documents from PostgreSQL. The frontend uses a client-side `localStorage` cache workaround.
-5. **Chat History Persistence Endpoint (`GET /api/chat/messages`)**:
+5. **Chat History Persistence Endpoint (`GET /api/chat/messages`)** *(done)*:
    - User and assistant messages are stored in the PostgreSQL `chat_messages` table, but no endpoint exists to retrieve chat history into the frontend upon page reload.
-6. **Automated Backend & Frontend Test Suites**:
+6. **Automated Backend & Frontend Test Suites** *(partly — see the status table above)*:
    - `ml/` has 204 tests in `ml/tests/` (187 passing unit tests + 17 live integration tests). `backend/` and `frontend/` currently have zero automated tests.
 7. **Evaluation Module (`evaluation/`)**:
    - `REPO_STRUCTURE.md` lists an `evaluation/` directory and scripts (`scripts/eval.sh`, `scripts/demo.sh`), which do not exist on disk.
@@ -59,20 +76,20 @@ This comprehensive audit surfaces all implemented features, remaining functional
 
 ## 3. Inconsistencies & Contract Mismatches
 
-### 3.1 `EvidenceCitation.score` Returns `None`
+### 3.1 `EvidenceCitation.score` Returns `None` — *fixed in `[0.7.1]`*
 - **Backend Location**: [`backend/app/services/citations.py:23-32`](file:///home/varun/Projects/PHIRE/backend/app/services/citations.py#L23-L32)
 - **Issue**: `chunk_to_citation()` never populates the `score` field, causing `score` to default to `None`.
 - **Frontend Impact**: [`frontend/app/search/page.tsx:175`](file:///home/varun/Projects/PHIRE/frontend/app/search/page.tsx#L175) renders `{(cite.score * 100).toFixed(1)}%`, displaying `0.0%` for all hybrid search results.
 
-### 3.2 `Claim.source_span` Type Mismatch
+### 3.2 `Claim.source_span` Type Mismatch — *fixed*
 - **Backend**: In [`backend/app/models/claim.py:33`](file:///home/varun/Projects/PHIRE/backend/app/models/claim.py#L33), `source_span: tuple[int, int] | None = None` (serializes to JSON array `[start, end]`).
 - **Frontend**: In [`frontend/lib/api.ts:19`](file:///home/varun/Projects/PHIRE/frontend/lib/api.ts#L19), `source_span` is typed as `string | null`.
 
-### 3.3 Redundant Document Processing Request
+### 3.3 Redundant Document Processing Request — *fixed in `[0.7.0]`*
 - **Backend**: [`backend/app/api/router_documents.py:78`](file:///home/varun/Projects/PHIRE/backend/app/api/router_documents.py#L78) automatically spawns a background processing task upon upload.
 - **Frontend**: [`frontend/app/documents/page.tsx:98`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx#L98) sends a redundant `POST /api/documents/{id}/process`, frequently receiving `409 Conflict: "Document is already being processed."`.
 
-### 3.4 Nullable Fields in Observation Contract
+### 3.4 Nullable Fields in Observation Contract — *fixed*
 - **Backend**: In [`backend/app/models/observation.py:28,34`](file:///home/varun/Projects/PHIRE/backend/app/models/observation.py#L28), `value: str | None = None` and `observed_date: date | None = None` (Condition nodes have `value = None`).
 - **Frontend**: [`frontend/lib/api.ts:51,57`](file:///home/varun/Projects/PHIRE/frontend/lib/api.ts#L51) types `value: string` and `observed_date: string` as non-nullable.
 
@@ -88,11 +105,11 @@ This comprehensive audit surfaces all implemented features, remaining functional
 - **Location**: [`docker/Dockerfile.backend:L43`](file:///home/varun/Projects/PHIRE/docker/Dockerfile.backend#L43)
 - **Bug**: `CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]` does not run `alembic upgrade head`. Running a clean `docker compose up` on a fresh volume leaves PostgreSQL without tables. (Local script `scripts/run_backend.sh:L22` runs migrations correctly).
 
-### 4.3 Missing Build Argument for Client Next.js Bundle
+### 4.3 Missing Build Argument for Client Next.js Bundle — *fixed in `[0.8.0]`*
 - **Location**: [`docker/Dockerfile.frontend:L1-L27`](file:///home/varun/Projects/PHIRE/docker/Dockerfile.frontend#L1-L27)
 - **Bug**: Next.js bakes `NEXT_PUBLIC_*` variables during `npm run build`. Without declaring `ARG NEXT_PUBLIC_API_URL` during the build stage, runtime environment variables in `docker-compose.yml` are not reflected in client JavaScript bundles.
 
-### 4.4 Missing GPU Pass-Through in Docker Compose
+### 4.4 Missing GPU Pass-Through in Docker Compose — *fixed in `[0.8.0]` (`docker-compose.gpu.yml`)*
 - **Location**: [`docker/docker-compose.yml:L47-L104`](file:///home/varun/Projects/PHIRE/docker/docker-compose.yml#L47-L104)
 - **Issue**: `ollama` and `backend` containers do not declare `deploy.resources.reservations.devices` with GPU capabilities, forcing containerized Ollama and PyTorch to execute on CPU.
 
@@ -100,7 +117,7 @@ This comprehensive audit surfaces all implemented features, remaining functional
 - **Location**: [`ml/claims/verifier.py:L70-L86`](file:///home/varun/Projects/PHIRE/ml/claims/verifier.py#L70-L86)
 - **Issue**: `ClaimVerifier.verify()` iterates through evidence chunks sequentially, executing individual BART-large-MNLI forward passes. Evaluating 8 claims against 50 facts generates 400 sequential model calls.
 
-### 4.6 Compound Clinical Metrics Omission
+### 4.6 Compound Clinical Metrics Omission — *fixed (`composite_readings.py`)*
 - **Location**: [`ml/graph/observations.py:L59-L60`](file:///home/varun/Projects/PHIRE/ml/graph/observations.py#L59-L60)
 - **Issue**: `_split_value()` intentionally rejects compound strings like `"148/92 mmHg"` (returning `(None, None)`) to prevent parsing corruption. As a result, blood pressure readings are excluded from numeric timeline charts and trend computations.
 
@@ -130,7 +147,7 @@ If document processing fails during OCR, table extraction, embedding, or graph w
 
 ---
 
-## 6. Actionable Implementation Roadmap
+## 6. Actionable Implementation Roadmap *(historical — every item below has been done except the recommendations work; the RapidOCR/pypdf router was superseded by lift and the Ollama vision extractor, and the compound-metric item is `composite_readings.py`)*
 
 1. **Backend & Frontend Fixes**:
    - In `backend/app/services/citations.py:chunk_to_citation()`, pass `score=getattr(chunk, "score", None)`.

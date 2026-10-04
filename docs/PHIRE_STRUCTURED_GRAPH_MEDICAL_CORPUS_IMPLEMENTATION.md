@@ -1013,18 +1013,17 @@ corrected. The actual status, consistent across all current docs:
   shipped, and live-tested — see `ml/graph/` and §4 above.
 - Neo4j is queried directly via hand-written Cypher, not through LightRAG.
 - **Multi-hop graph-RAG retrieval — entity/relationship traversal at query
-  time — is NOT YET IMPLEMENTED. This is outstanding work that must be
-  built, not an indefinitely-deferred or rejected option.** `README.md`
-  and `docs/DATASETS_AND_GRAPH_RAG.md` already describe this as part of
-  PHIRE's committed retrieval architecture (the third leg alongside BM25
-  and Chroma), so it's not speculative scope.
+  time — was IMPLEMENTED on 2026-10-05** (earlier text in this section said
+  "not yet implemented"; that was true until then). It is built as
+  deterministic hand-written Cypher traversal over the structured patient
+  graph (`ml/graph/graph_retrieval.py`, `relations.py`, `conflicts.py`),
+  alongside the deterministic lookup rather than replacing it, and **not**
+  through LightRAG: entity linking, one hop between medications/conditions
+  and metrics, full histories with overall change, and conflicting-record
+  detection.
 - `docs/GRAPH_SCHEMA_ROADMAP.md` section 3f is the authoritative
-  current-status entry for this — check it, not this document, for the
-  latest state.
-- Whether LightRAG specifically is the right library for this leg (vs.
-  hand-written multi-hop Cypher, vs. another approach) is a separate,
-  still-open implementation decision from *whether* this leg gets built.
-  It does.
+  current-status entry (scope, limits, what is still deferred) — check it,
+  not this document, for the latest state.
 
 For the immediate architecture change in this document:
 
@@ -1032,10 +1031,10 @@ For the immediate architecture change in this document:
 
 The patient graph should remain structured and controlled.
 
-Multi-hop graph retrieval should be built around/alongside it — as its
-own retrieval leg for relationship-traversal questions the deterministic
-lookup can't answer — not as a replacement for the deterministic
-patient-health schema.
+Multi-hop graph retrieval is built around/alongside it — as its own
+retrieval leg for relationship-traversal questions the deterministic lookup
+can't answer — not as a replacement for the deterministic patient-health
+schema (this is how it was implemented).
 
 ---
 
@@ -1750,7 +1749,7 @@ item is done, the note says what's missing.
 ## Priority 4: Hybrid retrieval
 
 - [x] Add graph retrieval interface (`ml/graph/patient_context.py`)
-- [ ] Add query routing — **not implemented.** `ml/chains/qa_chain.py` always runs BM25+Chroma retrieval *and* always fetches graph facts for every question; there's no question-shape-based routing (§17) that skips legs a question doesn't need. Related to, but distinct from, the multi-hop retrieval gap (§20) — this is about routing between existing legs, not adding a new one.
+- [~] Add query routing — **partly implemented (2026-10-05).** `ml/graph/graph_retrieval.py` now routes *within the graph leg* by question shape: it links the question to metrics/medications/conditions, follows one hop between them, and returns nothing when nothing links (chat then falls back to the full fact dump). `ml/chains/qa_chain.py` still always runs BM25+Chroma retrieval; there is no routing that skips that leg for a question that does not need it (§17). This is about routing between the BM25/Chroma and graph legs; the multi-hop graph leg itself now exists (see the multi-hop note in §20's status section).
 - [x] Retrieve patient facts structurally
 - [x] Retrieve medical evidence semantically/lexically
 - [x] Assemble unified context (`ml/llm/prompt_builder.py`'s `build_chat_prompt`)

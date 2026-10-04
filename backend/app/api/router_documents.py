@@ -8,13 +8,10 @@ immediately with status "uploaded"; poll GET /api/documents/{id} for
 "processed"/"failed".
 """
 
-import json
 import uuid
-from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, UploadFile
-from fastapi.responses import StreamingResponse
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -22,11 +19,11 @@ from starlette.concurrency import run_in_threadpool
 from app.config import get_settings
 from app.database.connection import get_db
 from app.database.schemas import Document
-from app.models.document import DocumentRead, DocumentUploadResponse
+from app.models.document import DocumentDateUpdate, DocumentRead, DocumentUploadResponse
 from app.services import progress
 from app.services.gpu_modes import CHAT, gpu_mode
 from app.services.ml_singletons import get_retriever, new_graph_client
-from app.services.document_processor import process_document
+from app.services.document_processor import process_document, redate_document
 from app.utils.constants import SUPPORTED_FILE_TYPES, DocumentStatus
 from app.utils.validators import read_upload_within_limit, validate_upload
 
@@ -128,45 +125,33 @@ def list_documents(db: Session = Depends(get_db)) -> list[Document]:
     return db.query(Document).order_by(Document.uploaded_at.desc()).all()
 
 
+@router.put("/{document_id}/date", response_model=DocumentRead)
+def set_document_date(document_id: uuid.UUID, body: DocumentDateUpdate, db: Session = Depends(get_db)) -> Document:
+    """Supply (or correct) a document's clinical date; its facts and search chunks are rebuilt at that date.
+
+    For a document flagged `needs_date` because no date could be extracted. Uses the saved extraction, so
+    it takes seconds, not a re-run of the vision model.
+    """
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if document.status != DocumentStatus.PROCESSED.value:
+        raise HTTPException(status_code=409, detail="Document is not processed yet; set its date once it finishes.")
+    if document.extracted_data is None:
+        raise HTTPException(
+            status_code=409,
+            detail="This document was processed before extractions were saved; delete it and upload it again.",
+        )
+    redate_document(db, document, body.document_date.isoformat())
+    return document
+
+
 @router.get("/{document_id}", response_model=DocumentRead)
 def get_document(document_id: uuid.UUID, db: Session = Depends(get_db)) -> Document:
     document = db.get(Document, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
-
-
-def _sse(event: str, data: dict) -> str:
-    """One Server-Sent Event frame."""
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
-@router.get("/{document_id}/events")
-def document_events(document_id: uuid.UUID, db: Session = Depends(get_db)) -> StreamingResponse:
-    """SSE stream of this document's ingestion stages, ending with processed/failed.
-
-    A document with no in-memory history (e.g. a backend restart wiped it)
-    gets one event reflecting its stored status and the stream closes --
-    nothing will ever publish for it, so waiting would just hang.
-    """
-    document = db.get(Document, document_id)
-    if document is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    key = str(document_id)
-    stored_status, stored_error = document.status, document.error_message
-
-    def stream() -> Iterator[str]:
-        if not progress.has_history(key):
-            yield _sse("progress", {"stage": stored_status, "message": stored_error or stored_status.capitalize()})
-            return
-        for event in progress.subscribe(key):
-            yield ": keep-alive\n\n" if event is None else _sse("progress", event)
-
-    return StreamingResponse(
-        stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 @router.delete("/{document_id}", status_code=204)

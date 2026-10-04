@@ -14,22 +14,54 @@ document_id's ingestion already wrote (see _rollback_ml_writes) -- a
 Document row marked FAILED should mean this document contributed no data
 anywhere, not just that its own Postgres row got rolled back.
 
-VRAM ordering: Lift extraction runs in gpu_mode(LIFT) and MedCPT embedding
-in gpu_mode(CHAT) (app.services.gpu_modes) -- the two groups can't share an
-8GB GPU, so each block evicts the other group first.
+Dates: when no clinical date can be found the document is saved with a provisional date and flagged
+`needs_date`; the user supplies the real one (`redate_document`), which rebuilds the document's facts and
+chunks from the saved extraction. We deliberately do not trust a silent "today": it can make an old report
+look like the latest reading.
+
+VRAM ordering: extraction runs in gpu_mode(extractor.gpu_mode) (LIFT for the lift VLM, CHAT for an
+Ollama-served vision model) and MedCPT embedding in gpu_mode(CHAT) (app.services.gpu_modes) -- lift and the
+chat group can't share an 8GB GPU, so each block evicts the other group first.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-
 from app.database.schemas import Document
 from app.services import progress
-from app.services.gpu_modes import CHAT, LIFT, gpu_mode
-from app.services.ml_singletons import get_lift_extractor, get_retriever, new_graph_client
+from app.services.gpu_modes import CHAT, gpu_mode
+from app.services.ml_singletons import get_extractor, get_retriever, new_graph_client
 from app.utils.constants import DocumentStatus
+
+
+def _write_derived(document: Document, data: dict, effective_date: str, emit) -> int:
+    """Chunk, index and write graph facts for one document at `effective_date`; returns the chunk count.
+
+    Shared by first-time processing and by redating, so both build exactly the same facts.
+    """
+    from ml.graph.conditions import build_conditions, write_conditions
+    from ml.graph.medications import build_medications, write_medications
+    from ml.graph.observations import build_lift_observations, write_observations
+    from ml.rag.ingest.ingest_patient_document import build_chunks
+
+    document_id = str(document.id)
+    chunks = build_chunks(Path(document.storage_path), data=data, document_id=document_id, filename=document.filename)
+    emit("index", f"Indexing {len(chunks)} passages for search")
+    with gpu_mode(CHAT, emit):
+        get_retriever().add_documents(chunks)
+
+    medications = build_medications(data.get("medications", []), str(data), document_id, effective_date)
+    conditions = build_conditions(data.get("conditions", []), str(data), document_id, effective_date)
+    observations = build_lift_observations(data.get("observations", []), document_id, effective_date)
+
+    emit("graph", "Saving labs, medications and conditions to your health timeline")
+    with new_graph_client() as client:
+        write_medications(client, document_id, document.filename, medications)
+        write_conditions(client, document_id, document.filename, conditions)
+        write_observations(client, document_id, document.filename, observations)
+    return len(chunks)
 
 
 def process_document(db: Session, document: Document) -> None:
@@ -41,43 +73,28 @@ def process_document(db: Session, document: Document) -> None:
     db.commit()
 
     try:
-        from ml.graph.conditions import build_conditions, write_conditions
-        from ml.graph.document_dates import find_document_date
-        from ml.graph.medications import build_medications, write_medications
-        from ml.graph.observations import build_lift_observations, write_observations
-        from ml.rag.ingest.ingest_patient_document import build_chunks
+        from ml.graph.document_dates import extract_document_date
         from ml.rag.ingest.patient_documents import extract_document_data
 
-        path = Path(document.storage_path)
+        extractor = get_extractor()
+        with gpu_mode(extractor.gpu_mode, emit):
+            emit("extract", "Reading the document (about a minute)")
+            data = extract_document_data(Path(document.storage_path), extractor=extractor)
 
-        with gpu_mode(LIFT, emit):
-            emit("extract", "Reading the document with the vision model (about a minute)")
-            data = extract_document_data(path, extractor=get_lift_extractor())
-        document_id = str(document.id)
         raw_date = data.get("document_date")
-        effective_date = find_document_date(raw_date) if raw_date else find_document_date(str(data))
+        found = (extract_document_date(raw_date) if raw_date else None) or extract_document_date(str(data))
+        effective_date = found or date.today().isoformat()  # provisional until the user confirms it
+        chunk_count = _write_derived(document, data, effective_date, emit)
 
-        chunks = build_chunks(path, data=data, document_id=document_id, filename=document.filename)
-        emit("index", f"Indexing {len(chunks)} passages for search")
-        with gpu_mode(CHAT, emit):
-            get_retriever().add_documents(chunks)
-
-        medications = build_medications(data.get("medications", []), str(data), document_id, effective_date)
-        conditions = build_conditions(data.get("conditions", []), str(data), document_id, effective_date)
-        observations = build_lift_observations(data.get("observations", []), document_id, effective_date)
-
-        emit("graph", "Saving labs, medications and conditions to your health timeline")
-        with new_graph_client() as client:
-            write_medications(client, document_id, document.filename, medications)
-            write_conditions(client, document_id, document.filename, conditions)
-            write_observations(client, document_id, document.filename, observations)
-
+        document.extracted_data = data
+        document.document_date = effective_date
+        document.needs_date = found is None
         document.status = DocumentStatus.PROCESSED.value
         document.processed_at = datetime.utcnow()
-        document.chunk_count = len(chunks)
+        document.chunk_count = chunk_count
         db.add(document)
         db.commit()
-        progress.publish(key, "processed", "Done", final=True)
+        progress.publish(key, "processed", "Done" if found else "Done -- this document needs a date", final=True)
 
     except Exception as exc:  # noqa: BLE001 — surfaced on the Document row, not swallowed
         db.rollback()
@@ -88,6 +105,30 @@ def process_document(db: Session, document: Document) -> None:
         db.commit()
         progress.publish(key, "failed", str(exc), final=True)
         raise
+
+
+def redate_document(db: Session, document: Document, new_date: str) -> None:
+    """Rebuild a document's graph facts and search chunks at the user-supplied clinical date.
+
+    Uses the saved extraction (no vision-model run). The old facts/chunks are removed first (errors
+    propagate, like a user delete, so a half-redated document is never reported as done), then written
+    again with `new_date`.
+    """
+    from ml.graph.deletion import delete_document_facts
+
+    data = {**document.extracted_data, "document_date": new_date}
+    document_id = str(document.id)
+    with gpu_mode(CHAT):
+        get_retriever().delete_by_document_id(document_id)
+    with new_graph_client() as client:
+        delete_document_facts(client, document_id)
+
+    document.chunk_count = _write_derived(document, data, new_date, lambda stage, message: None)
+    document.extracted_data = data
+    document.document_date = new_date
+    document.needs_date = False
+    db.add(document)
+    db.commit()
 
 
 def _rollback_ml_writes(document_id) -> None:

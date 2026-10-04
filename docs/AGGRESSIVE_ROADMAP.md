@@ -4,6 +4,8 @@
 **Team**: Varun (ML & Intelligence), Anika (Backend Infrastructure), Shashwati (Frontend & Evaluation)
 **Research Basis**: 2023-2026 healthcare AI evolution analysis
 
+**Updated 2026-10-05** to match the built system (end-to-end on GPU and CPU, in Docker, with a verified UI).
+
 **Note (2026-08-26)**: this doc originally used a 3-week/9-month calendar
 framing with hour-based effort estimates. Both removed — the checklists
 below reflect actual build status, not a schedule or a time budget.
@@ -14,13 +16,14 @@ below reflect actual build status, not a schedule or a time budget.
 
 ### Infrastructure Bootstrap
 - [x] Ollama + medgemma:4b (chat) → localhost:11434
-- [x] datalab-to/lift (9.7B VLM schema-guided extraction, 4-bit NF4 applied in `LiftExtractor` & CPU fallback) — real-model run verified 2026-10-04
+- [x] datalab-to/lift (9.7B VLM schema-guided extraction, 4-bit NF4 applied in `LiftExtractor`; GPU machines) — real-model run verified 2026-10-04
+- [x] CPU-only variant: Ollama vision extractor, CPU PyTorch image (~2.7GB), auto-selected by `scripts/run.sh` (`docs/CPU_SETUP.md`)
 - [x] LIFT/CHAT GPU residency modes so lift and the chat models share an 8GB GPU (`backend/app/services/gpu_modes.py`)
 - [x] SSE progress for document ingestion and chat (`GET /api/documents/{id}/events`, `POST /api/chat/stream`)
 - [x] PostgreSQL (Docker) — Chroma is the vector store, not pgvector
 - [x] Chroma vector DB (native Python, in-process)
 - [x] Neo4j (Docker/podman) — Longitudinal Health Graph
-- [x] FastAPI scaffold with async routing — all 8 routers wired to real `ml/` interfaces (`backend/README.md`)
+- [x] FastAPI scaffold with async routing — all 9 routers wired to real `ml/` interfaces (`backend/README.md`)
 - [x] Next.js 16 setup with App Router & React 19 (`frontend/`)
 - **Deliverable**: All services running, basic API endpoints — ✅ true for `ml/`, `backend/`, and `frontend/`
 
@@ -43,9 +46,10 @@ below reflect actual build status, not a schedule or a time budget.
 ### Longitudinal Reasoning
 - [x] Health timeline construction (Observations grouped by date, Neo4j)
 - [x] Temporal normalization (day-first date parsing, DOB exclusion — `ml/graph/document_dates.py`)
-- [x] Trend detection (latest vs. previous reading, `ml/graph/patient_context.py`'s `get_trend_facts`)
+- [x] Trend detection (latest vs. previous reading, `ml/graph/patient_context.py`'s `get_trend_facts`) plus full-history/overall-change summaries
 - [x] LLM reasoning over timeline context
 - [x] Enhanced prompt: patient context + evidence + trend facts
+- [x] Graph retrieval: entity linking, one-hop medication/condition → metric expansion, conflicting-record detection (`ml/graph/graph_retrieval.py`)
 - **Deliverable**: System understands "your LDL has increased 18 points" — ✅ done and live-tested (labeled `DERIVED`, not asserted by the LLM itself)
 
 ### Fitness Recommendations + Hallucination Detection
@@ -57,18 +61,18 @@ below reflect actual build status, not a schedule or a time budget.
 - **Deliverable**: System gives fitness advice + halts on unsupported health claims — hallucination detection ✅ done and live-tested; fitness advice ❌ not started
 
 ### Integration + Polish
-- [ ] Connect all subsystems (frontend ↔ backend ↔ RAG ↔ LLM ↔ HAR) — `backend` ↔ `ml/` wired and live-tested (`docs/BACKEND_HANDOFF.md`); `frontend` ↔ `backend` not started (see `docs/FRONTEND_HANDOFF.md`)
+- [x] Connect all subsystems (frontend ↔ backend ↔ RAG ↔ LLM; HAR not started) — verified end to end in Docker (`docs/BACKEND_HANDOFF.md`, `CHANGELOG.md` `[0.8.0]`)
 - [x] Error handling, logging, HIPAA audit trails (backend scope) — `AuditMiddleware` (`backend/app/security.py`), per-request audit log
-- [ ] Caching layer (reduce LLM inference latency)
+- [ ] Caching layer (reduce LLM inference latency) — not built (batched fp16 claim verification and the GPU modes cut latency instead)
 - [x] Privacy audit within `ml/` — every Ollama/Neo4j call enforces local-only at the code level (`ml/local_only.py`), not just convention
-- **Deliverable**: Complete end-to-end system working — ✅ true for `ml/` + `backend/` together (live-tested, including a full review pass — see `CHANGELOG.md`'s `[0.5.0]`); not yet true end-to-end through a UI. See `docs/BACKLOG.md` for what's still open in ml/backend before that.
+- **Deliverable**: Complete end-to-end system working — ✅ true end to end (`ml/` + `backend/` + `frontend/`, GPU and CPU variants, in Docker; see `CHANGELOG.md` `[0.8.0]`–`[0.9.0]`). Earlier note: true for `ml/` + `backend/` together (live-tested, including a full review pass — see `CHANGELOG.md`'s `[0.5.0]`); not yet true end-to-end through a UI. See `docs/BACKLOG.md` for what's still open in ml/backend before that.
 
 ### Evaluation + Documentation
 - [ ] ArchEHR-QA 2026 evaluation (167 expert cases) — not started (Shashwati's scope)
 - [ ] Baseline metrics: evidence attribution precision/recall, claim extraction quality, hallucination rate, response latency
 - [x] Live end-to-end pipeline testing (`ml/tests/test_qa_chain_live_e2e.py`, real Ollama/Neo4j/Chroma, no mocks)
-- [ ] Demo personas + end-to-end workflow testing through a UI
-- [x] README + deployment guide — `ml/README.md`, `backend/README.md` done; frontend's still pending its own build
+- [ ] Demo personas + end-to-end workflow testing through a UI — the UI itself was driven end to end in real Chrome (`[0.8.1]`); persona-based evaluation is not done
+- [x] README + deployment guide — root `README.md`, `ml/README.md`, `backend/README.md`, `frontend/README.md`, `docs/CPU_SETUP.md`, `docs/BACKEND_HANDOFF.md` §8
 - [ ] CI/CD setup
 
 ---
@@ -78,12 +82,12 @@ below reflect actual build status, not a schedule or a time budget.
 | Feature | Status | Research Value |
 |---------|--------|-----------------|
 | Local LLM inference | ✅ | Baseline |
-| Evidence attribution | ✅ (ml/ pipeline; UI not built) | ⭐⭐⭐⭐⭐ |
+| Evidence attribution | ✅ (pipeline, API and UI) | ⭐⭐⭐⭐⭐ |
 | Longitudinal reasoning | ✅ | ⭐⭐⭐⭐⭐ |
 | Hallucination detection | ✅ | ⭐⭐⭐⭐ |
 | Document ingestion | ✅ | ⭐⭐ |
 | Fitness recommendations | ❌ not started | ⭐⭐⭐⭐ |
-| Health timeline (graph) | ✅ (ml/ facts + trends; visualization not built) | ⭐⭐⭐⭐ |
+| Health timeline (graph) | ✅ (facts, trends, per-unit charts) | ⭐⭐⭐⭐ |
 | ArchEHR-QA evaluation | ❌ not started | ⭐⭐⭐⭐ |
 
 ---
@@ -91,7 +95,7 @@ below reflect actual build status, not a schedule or a time budget.
 ## 🎯 Extended Roadmap (Phased, Not Calendar-Bound)
 
 ### Phase 2: Advanced Evidence & ML
-- [ ] Contradiction detection (conflicting lab values across visits) — see `docs/GRAPH_SCHEMA_ROADMAP.md` §3b (claim→evidence graph edges) for the prerequisite groundwork
+- [x] Contradiction detection for same-fact/same-date disagreements between documents (`ml/graph/conflicts.py`, surfaced in chat). Source-authority ranking and temporal precedence are not built; claim→evidence graph edges (`docs/GRAPH_SCHEMA_ROADMAP.md` §3b) remain deferred
 - [ ] Evidence ranking beyond current authority/recency (guidelines > RCTs > observational data)
 - [ ] Multi-modal document understanding (images + tables + text)
 - [ ] Start nutrition recommendation data collection
@@ -104,7 +108,7 @@ below reflect actual build status, not a schedule or a time budget.
 - [ ] Multi-disease interaction modeling
 
 ### Phase 4: Multimodal + Multi-hop Retrieval
-- [ ] Multi-hop graph-RAG retrieval (LightRAG-style entity/relationship traversal) — **not yet implemented, outstanding work**, see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f
+- [x] Multi-hop / longitudinal graph retrieval — **built 2026-10-05** as deterministic Cypher traversal (not LightRAG), see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f; a single traversal from the patient graph into a guideline passage in Chroma is not built
 - [ ] Medical image understanding (X-rays, lab graphs)
 - [ ] Structured + unstructured data fusion
 - [ ] Explainability improvements (show reasoning)
@@ -131,7 +135,7 @@ category and out of scope, not a later phase of this one.
 ## 🎯 Success Metrics (Core Scope)
 
 ### Technical Success
-- [ ] Response latency <3 seconds end-to-end (ml/ pipeline latency not yet benchmarked outside live-test runs)
+- [ ] Response latency <3 seconds end-to-end — not met: a warm, fully verified chat turn takes ~5s on the 8GB GPU (first turn after an upload ~15s) and ~40–70s on a CPU-only laptop (`docs/CPU_SETUP.md`)
 - [ ] Evidence attribution precision >85% (not yet measured against a real benchmark)
 - [ ] Hallucination rate reduced by 40%+ vs. baseline (not yet measured)
 - [ ] ArchEHR-QA: 75%+ claims fully supported (evaluation not started)
@@ -145,10 +149,10 @@ category and out of scope, not a later phase of this one.
 - [x] Reproducible code — `ml/` is on GitHub with a live-tested pipeline and dated findings log (`docs/RESEARCH_LOG.md`)
 
 ### Product Success
-- [ ] End-user demo works flawlessly (individual using PHIRE for their own health data, end-to-end through a UI — not built yet)
-- [ ] README enables setup in <30 minutes (`ml/README.md` covers `ml/`; full-stack setup not yet documented end-to-end)
-- [x] `ml/` code is clean, documented, tested (200+ tests, static-analysis clean)
-- [ ] Deployment process automated (docker-compose)
+- [ ] End-user demo works flawlessly (individual using PHIRE for their own health data, end-to-end through a UI — the UI and pipeline work end to end; a polished demo with real records is not done)
+- [x] README enables setup (root `README.md` + `scripts/run.sh`; CPU-only guide in `docs/CPU_SETUP.md`) — the <30 minute target is not measured (first start downloads large models)
+- [x] `ml/` code is clean, documented, tested (312 tests passing)
+- [x] Deployment process automated (`scripts/run.sh` + docker-compose, GPU and CPU variants)
 
 ---
 
@@ -160,7 +164,6 @@ category and out of scope, not a later phase of this one.
 - ❌ Multilingual support (English only for now)
 - ❌ FHIR representation (extend after core works)
 - ❌ Wearable integration (Phase 3)
-- ❌ Multi-hop graph-RAG retrieval (Phase 4 — see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f; this is committed future scope, not indefinitely deferred)
 
 **Rationale**: Ship core innovation (evidence attribution) first, iterate on extensions.
 
@@ -204,5 +207,5 @@ Aiming to be among the first open-source systems with:
 
 ---
 
-**Status**: Core `ml/` scope implemented and live-tested; backend/frontend integration and extended phases outstanding.
+**Status**: Core scope implemented and live-tested end to end (`ml/`, `backend/`, `frontend/`, Docker, GPU and CPU); fitness/nutrition recommendations, evaluation benchmarks and the extended phases are outstanding.
 **Risk Level**: Low for what's built (every component benchmarked, live-tested); unestimated for what isn't.

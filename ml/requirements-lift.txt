@@ -1,0 +1,6 @@
+# Visual document extraction with datalab-to/lift (9.7B VLM) -- GPU machines only. 4-bit NF4 quantization
+# (bitsandbytes) is what lets it fit an 8GB card; there is no CPU path (use the Ollama vision extractor,
+# docs/CPU_SETUP.md). Install on top of ml/requirements.txt.
+lift-pdf[hf]>=0.1.0
+bitsandbytes>=0.43.0
+accelerate>=0.28.0

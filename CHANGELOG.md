@@ -524,6 +524,27 @@ Remaining frontend gaps and ideas are listed in `docs/BACKLOG.md` §1 (reference
 
 ---
 
+## [0.9.0] - 2026-10-05
+
+### Graph retrieval, missing-date prompt, USDA evidence fix, CPU-only variant, docs audit
+
+**Added**
+- **Graph retrieval** (`ml/graph/graph_retrieval.py`, `relations.py`, `conflicts.py`): the third retrieval leg. Links the question to metrics, medications and conditions, follows one hop (a statin → the lipid panel) through a small curated table, returns full histories with an overall-change summary, and detects conflicting records (same fact, same date, different documents). Every sentence carries its source files into the verification pool, so claims built on them are `DERIVED` and cite all documents involved; when nothing links, chat keeps the full-fact behavior; a "no conflicts" statement is explicit. Deterministic Cypher traversal, not LightRAG (`docs/GRAPH_SCHEMA_ROADMAP.md` §3f).
+- **Missing document dates are asked for**: `extract_document_date()` returns `None` instead of falling back to today; the backend saves each document's extraction (`documents.extracted_data`, `document_date`, `needs_date`; migration `b7d2f3a9c1e4`), stores a provisional date and flags the document; `PUT /api/documents/{id}/date` rebuilds its graph facts and search chunks from the saved extraction in seconds; the Documents page shows an inline date prompt and the dashboard a banner.
+- **CPU-only variant**: `OllamaVisionExtractor` (page images + PDF text layer → schema-constrained JSON via `medgemma:4b`, ~110–135s per page on CPU), `PHIRE_EXTRACTOR=auto|lift|ollama`, a CPU-only PyTorch backend image (`VARIANT=cpu`, **2.67GB vs 11.1GB**), `docker/docker-compose.cpu.yml`, GPU/CPU auto-selection in `scripts/run.sh` and `scripts/setup.sh`, and `docs/CPU_SETUP.md` (hardware guidance, measured timings, limits). Requirements are split into `ml/requirements.txt` (CPU-safe base), `ml/requirements-lift.txt` (GPU extra) and `ml/requirements-experiments.txt` (benchmarks only).
+
+**Fixed**
+- **USDA evidence rendered as sentences** with spelled-out units and FDA "high / good source" statements (selected by an offline experiment on 9 labelled claims); **MedlinePlus sentence spacing repaired** (169 of 176 stored passages had glued sentences). `python -m ml.rag.ingest.reformat_corpus` upgrades an existing corpus offline. Side effect, a correction: "about 20 grams of protein" for salmon no longer passes against 24.6 g.
+- `OllamaClient` ignored the configured `OLLAMA_TIMEOUT_SECONDS` (fixed 120s); it is now honored.
+- The "Loading chat models onto the GPU" progress message is no longer sent on machines without a GPU.
+- Test isolation: `test_document_processor.py` replaced the real `sqlalchemy` with a mock whenever it had not yet been imported.
+
+**Docs**: a full consistency audit of every markdown file (README, GET_STARTED, REPO_STRUCTURE, CONTRIBUTING, all `docs/*`, `ml/`/`backend/`/`frontend/` READMEs — `frontend/README.md` replaced the create-next-app boilerplate); `docs/BACKLOG.md` rewritten as a clean list of what is open; `docs/CODEBASE_AUDIT.md` and the historical sections marked as point-in-time records.
+
+**Tests**: 312 passing (new: graph retrieval and conflicts incl. a real-Neo4j test, composite-aware QA wiring, the date flow, the extractor, extractor selection, reference text, DELETE and route-registration guards).
+
+---
+
 ## Future Versions
 
 See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.

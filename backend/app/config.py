@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     # ml/llm/ollama_client.py) -- medgemma ships 4B/27B, not 8B.
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "medgemma:4b"
-    ollama_timeout_seconds: float = 30.0
+    # Per generation call. Was 30 and unused until the client honored it; 120 is what the client always used,
+    # and CPU-only machines need far more (docker-compose.cpu.yml sets 600).
+    ollama_timeout_seconds: float = 120.0
 
     # --- Legacy model config (deprecated; superseded by Lift VLM) ---
     ocr_model: str = "olmocr"
@@ -43,6 +45,11 @@ class Settings(BaseSettings):
     lift_model: str = Field(default="datalab-to/lift", validation_alias="LIFT_MODEL")
     lift_device: str = Field(default="auto", validation_alias="LIFT_DEVICE")
     phire_mock_lift: bool = Field(default=False, validation_alias="PHIRE_MOCK_LIFT")
+
+    # --- Document extractor ---
+    # "auto": lift when a CUDA GPU and lift-pdf are present, else the Ollama vision model (the CPU variant).
+    phire_extractor: str = Field(default="auto", validation_alias="PHIRE_EXTRACTOR")  # auto | lift | ollama
+    ollama_vision_model: str | None = Field(default=None, validation_alias="OLLAMA_VISION_MODEL")  # default: ollama_model
 
     # --- Neo4j (ml/graph -- Longitudinal Health Graph) ---
     neo4j_uri: str = "bolt://localhost:7687"

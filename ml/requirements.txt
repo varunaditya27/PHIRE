@@ -1,11 +1,15 @@
-# PHIRE ML layer dependencies. Requires Python 3.11/3.12 (managed via uv,
-# see ml/.venv) — system Python 3.14 lacks wheels for torch/chromadb.
+# PHIRE ML layer dependencies (base: runs on CPU or GPU). Requires Python 3.12 (lift-pdf needs >= 3.12;
+# managed via uv, see ml/.venv) -- system Python 3.14 lacks wheels for torch/chromadb.
+#
+# Install sets:
+#   GPU machine (CUDA):  pip install -r ml/requirements.txt -r ml/requirements-lift.txt
+#   CPU-only machine:    pip install torch --index-url https://download.pytorch.org/whl/cpu
+#                        pip install -r ml/requirements.txt          (no lift; see docs/CPU_SETUP.md)
+#   Experiments/benchmarks (optional): add -r ml/requirements-experiments.txt
 
-# --- Embeddings / retrieval ---
-# embeddings.py uses MedCPT directly via transformers/torch (dual encoder,
-# not a single Sentence-Transformers model); sentence-transformers is kept
-# for ml/rag/experiments' other benchmark candidates.
-sentence-transformers
+# --- Embeddings / retrieval / verification ---
+# embeddings.py uses MedCPT directly via transformers/torch (dual encoder, not a single
+# Sentence-Transformers model).
 transformers
 torch
 rank-bm25
@@ -14,17 +18,13 @@ numpy
 requests
 
 # --- Patient document ingestion ---
-pypdf
+# pypdfium2 renders PDF pages (and reads their text layer) for the Ollama vision extractor; pillow
+# resizes/encodes the page images.
+pypdfium2
 pillow
-rapidocr-onnxruntime
 
 # --- Graph RAG ---
 neo4j
 
 # --- Testing ---
 pytest
-
-# --- Visual Document Extraction (Lift VLM) ---
-lift-pdf[hf]>=0.1.0
-bitsandbytes>=0.43.0
-accelerate>=0.28.0
