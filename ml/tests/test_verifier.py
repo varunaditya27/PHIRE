@@ -130,3 +130,22 @@ def test_predict_batch_returns_results_in_input_order_despite_length_sorting():
 
     expected = [torch.softmax(torch.tensor([float(len(p)), 0.0, 0.0]), dim=-1)[0].item() for p in premises]
     assert [round(r["entailment"], 6) for r in results] == [round(e, 6) for e in expected]
+
+
+def test_place_uses_fp32_on_cpu_and_fp16_on_cuda():
+    import pytest
+    import torch
+
+    verifier = ClaimVerifier.__new__(ClaimVerifier)
+    verifier._model = torch.nn.Linear(2, 2)
+
+    verifier.move_to("cpu")
+    assert verifier._model.weight.dtype == torch.float32 and verifier._device == "cpu"
+
+    if torch.cuda.is_available():
+        verifier.move_to("cuda")
+        assert verifier._model.weight.dtype == torch.float16
+        verifier.move_to("cpu")  # parked on CPU while lift owns the GPU -> back to fp32
+        assert verifier._model.weight.dtype == torch.float32 and not verifier._model.weight.is_cuda
+    else:
+        pytest.skip("no CUDA device to check the fp16 branch")

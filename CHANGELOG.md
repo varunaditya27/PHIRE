@@ -467,6 +467,14 @@ Tests: pool-packing and order-restoration tests; **261 passing.** Docs updated: 
 
 ---
 
+## [0.7.5] - 2026-10-04
+
+### fp16 claim verification on CUDA
+
+`ClaimVerifier` now runs BART-large-MNLI in fp16 on CUDA (fp32 on CPU; `move_to` converts in step with the device; softmax computed in fp32). Checked on the 129 hand-labeled pairs (`ml/claims/experiments/eval_data`): accuracy vs gold 0.9690 both ways, 0 argmax-label flips, 0 threshold-status flips, max probability difference 0.0024, pairs sitting at a threshold unchanged. Steady-state typical turn (15 pairs × 3 claims) 1.27s → 0.40s (~3.1×); worst-case pool (105 pairs × 3) ≈ 0.9s vs 7.2s for the original sequential fp32 loop. Peak model VRAM 1.9 → 1.6GiB. Drawback: ~2s one-time kernel warmup on the first verification after startup. Test: `test_place_uses_fp32_on_cpu_and_fp16_on_cuda`.
+
+---
+
 ## Future Versions
 
 See `docs/AGGRESSIVE_ROADMAP.md` for the extended-phase checklist beyond core scope.

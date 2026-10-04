@@ -71,7 +71,8 @@ class ClaimVerifier:
         self.model_name = model_name or os.environ.get("NLI_MODEL", DEFAULT_MODEL)
         self._device = _DEVICE
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).to(self._device).eval()
+        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name).eval()
+        self._place(self._device)
         self._index_to_label = {idx: label.lower() for idx, label in self._model.config.id2label.items()}
 
     def verify(self, claim: str, evidence: list[Chunk]) -> ClaimVerification:
@@ -100,7 +101,20 @@ class ClaimVerifier:
     def move_to(self, device: str) -> None:
         """Move weights to `device` -- lets the backend park this model in CPU RAM while lift owns the GPU."""
         self._device = device
-        self._model.to(device)
+        self._place(device)
+
+    def _place(self, device: str) -> None:
+        """Put the model on `device` in the right precision: fp16 on CUDA, fp32 elsewhere.
+
+        fp16 halves the model's VRAM and measured ~2.3x faster on a worst-case claim pool,
+        with identical accuracy on the 129 hand-labeled pairs (0.969 both), 0 label or
+        threshold flips and a max probability difference of 0.0024. CPU stays fp32 because
+        half precision is slow/unsupported there.
+        """
+        if device.startswith("cuda"):
+            self._model.to(device).half()
+        else:
+            self._model.float().to(device)
 
     def _predict_batch(self, premises: list[str], hypothesis: str) -> list[dict[str, float]]:
         """NLI probability distribution for each (premise, hypothesis) pair, in input order.
@@ -121,7 +135,7 @@ class ClaimVerifier:
                     {key: [encoded[key][i] for i in indices] for key in ("input_ids", "attention_mask")},
                     return_tensors="pt",
                 ).to(self._device)
-                probs = torch.softmax(self._model(**batch).logits, dim=-1).cpu().tolist()
+                probs = torch.softmax(self._model(**batch).logits.float(), dim=-1).cpu().tolist()  # softmax in fp32
                 for i, row in zip(indices, probs):
                     results[i] = {self._index_to_label[idx]: prob for idx, prob in enumerate(row)}
         return results  # type: ignore[return-value]  # every slot is filled above
