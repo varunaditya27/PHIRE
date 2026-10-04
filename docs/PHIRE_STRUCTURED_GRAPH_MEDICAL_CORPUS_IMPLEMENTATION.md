@@ -249,12 +249,11 @@ Current implementation characteristics:
 - table headers act as schema
 - 8/8 observations were successfully extracted and typed in the existing live test
 - single `Patient` node (`self`) matches the current single-user local-instance model
-- idempotent writes using stable IDs / `MERGE`
-- typed `Medication` and `Condition` nodes: **done, shipped** (`ml/graph/medications.py`, `ml/graph/conditions.py`), extracted from free text via schema-constrained LLM extraction (`ml/graph/prose_extraction.py`)
+- typed `Medication` and `Condition` nodes: **done, shipped** (`ml/graph/medications.py`, `ml/graph/conditions.py`), extracted via unified schema-guided visual extraction (`ml/rag/ingest/lift_schema.py`, `ml/rag/ingest/lift_extractor.py`)
 - FHIR-inspired field naming: **done, shipped** (`code`/`value`/`effective`/`interpretation` — see `ml/graph/observations.py`)
 - read path feeding chat generation and claim verification: **done, shipped** (`ml/graph/patient_context.py` — current-state facts and precomputed trend deltas)
 
-*(Status notes above added 2026-08-26; the rest of this document describes design intent as of when it was written and is otherwise left as-is — see `docs/GRAPH_SCHEMA_ROADMAP.md` for the maintained current-state doc.)*
+*(Status notes above updated 2026-09-09; the rest of this document describes design intent as of when it was written and is otherwise left as-is — see `docs/GRAPH_SCHEMA_ROADMAP.md` for the maintained current-state doc.)*
 
 Do **not** throw this away.
 
@@ -429,8 +428,8 @@ The pipeline is:
 Report
   |
   v
-OCR / document parser (implemented: pypdf for text PDFs, olmOCR-v2 for
-scanned/photographed documents -- not Docling; see ml/rag/ingest/)
+OCR / document parser (implemented: datalab-to/lift 9.7B VLM for
+digital/scanned PDFs and images -- not Docling; see ml/rag/ingest/)
   |
   +----------------------+
   |                      |
@@ -757,7 +756,7 @@ Patient documents should primarily go through:
 PDF
   |
   v
-OCR / document parser (pypdf + olmOCR-v2, not Docling)
+OCR / document parser (datalab-to/lift 9.7B VLM, not Docling)
   |
   +--> structured tables --> graph
   |
@@ -1730,8 +1729,8 @@ item is done, the note says what's missing.
 
 ## Priority 2: Incremental SLM ingestion
 
-- [x] Define constrained extraction schema (`ml/graph/prose_extraction.py`'s `EXTRACTION_SCHEMA`)
-- [x] Add local SLM extraction interface (`extract_facts`)
+- [x] Define constrained extraction schema (`ml/rag/ingest/lift_schema.py`'s `CLINICAL_DOCUMENT_SCHEMA`)
+- [x] Add local VLM extraction interface (`LiftExtractor.extract`)
 - [x] Add metric/entity candidate resolution (`ml/graph/metric_resolver.py` — deterministic lexical matching only, by design, not SLM-based; see that module's own docstring)
 - [ ] Add deterministic validation — basic value-parsing safety exists (rejects unparseable/compound values rather than guessing), but not the fuller confidence-threshold + unit-compatibility + patient-scope validation layer described in §10
 - [ ] Add unresolved-fact path — an unmatched metric name currently passes through as-is (not remapped), not marked `UNRESOLVED` as a distinct tracked state

@@ -80,7 +80,7 @@ GET  /api/recommendations/nutrition # nutrition recommendations
 - **PostgreSQL**: Schema, migrations, encryption, audit logging (relational only — Chroma is the vector store, not pgvector)
 - **Chroma Vector DB**: Embedding pipeline, retrieval indexes (in-process, `ml/rag/retriever.py` owns the client)
 - **Docker & Deployment**: Containerization, docker-compose, CI/CD
-- **Document Processing**: already implemented in `ml/rag/ingest/` (pypdf for text PDFs, olmOCR-v2 for scans/photos) — Anika's scope here is backend wiring (`POST /api/documents/upload` calling into `ml/`), not building extraction from scratch
+- **Document Processing**: implemented in `ml/rag/ingest/` (unified visual extraction via `datalab-to/lift` 9.7B VLM with Option A RAG chunk synthesis) — wired in `backend/app/services/document_processor.py` under `GPU_LOCK`
 - **HIPAA Compliance**: Audit trails, data retention, security
 - **DevOps**: Scripts, deployment automation, health checks
 
@@ -104,11 +104,11 @@ GET  /api/recommendations/nutrition # nutrition recommendations
    - Reranking pipeline
    - Evidence embedding & storage
 
-4. **Document Processing** (extraction implemented in `ml/rag/ingest/`; Anika's scope is backend wiring, not the extraction logic itself)
-   - PDF/OCR text extraction (pypdf + olmOCR-v2, `ml/rag/ingest/patient_documents.py`) with layout-aware table parsing
-   - Table extraction & normalization (`ml/rag/ingest/table_parsing.py`)
-   - Source provenance tracking (exact character spans, `ml/rag/ingest/chunking.py`)
-   - Metadata enrichment
+4. **Document Processing** (unified extraction implemented in `ml/rag/ingest/` via `datalab-to/lift` VLM)
+   - Unified visual document extraction (`datalab-to/lift`, `ml/rag/ingest/lift_extractor.py`) across digital PDFs, scanned PDFs, and images
+   - Schema-guided clinical extraction (`ml/rag/ingest/lift_schema.py`)
+   - Option A declarative RAG chunk synthesis (`ml/rag/ingest/chunk_synthesizer.py`)
+   - Transactional rollback and GPU serialization (`backend/app/services/document_processor.py`)
 
 5. **Security & Privacy**
    - TLS/SSL configuration

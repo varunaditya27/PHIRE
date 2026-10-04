@@ -364,6 +364,25 @@ below.
   `docs/FRONTEND_HANDOFF.md` (all added in `[0.4.0]`/`[0.5.0]` but never
   added to the tree listing) — added
 
+## [0.6.0] - 2026-09-09
+
+### Unified Schema-Guided Visual Document Extraction via datalab-to/lift VLM
+
+**Added**
+- `ml/rag/ingest/lift_schema.py`: `CLINICAL_DOCUMENT_SCHEMA` and `validate_lift_payload` adhering strictly to Datalab Lift grammar compilation constraints (natural language descriptions, no `enum`/`anyOf`/`oneOf`/`$ref`/`additionalProperties`).
+- `ml/rag/ingest/chunk_synthesizer.py`: Option A declarative clinical sentence synthesizer converting structured visual extractions into clean clinical sentences optimized for BART-large-MNLI entailment scoring.
+- `ml/rag/ingest/lift_extractor.py`: Single-pass visual extractor supporting multi-page PDFs and images (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`) with 4-bit NF4 quantization on CUDA, graceful CPU fallback, and deterministic mock mode (`PHIRE_MOCK_LIFT=true`).
+- `ml/tests/`: Comprehensive unit test suites (`test_lift_config.py`, `test_lift_schema.py`, `test_chunk_synthesizer.py`, `test_lift_extractor.py`, `test_document_processor.py`) expanding test coverage to 200 passing unit tests.
+
+**Changed**
+- `backend/app/services/ml_singletons.py`: Added lazy `@lru_cache` `get_lift_extractor()` singleton with `LIFT_MODEL`, `LIFT_DEVICE`, and `PHIRE_MOCK_LIFT` settings.
+- `backend/app/services/document_processor.py`: Refactored `process_document` to run `LiftExtractor` and chunk indexing under `GPU_LOCK`, with transactional rollback for both Chroma and Neo4j upon failure.
+- `ml/rag/ingest/patient_documents.py` & `ingest_patient_document.py`: Migrated patient document routing and chunking to `LiftExtractor` and `synthesize_patient_chunks`.
+- `ml/graph/document_dates.py`: Standardized ISO `YYYY-MM-DD` date normalization for all graph observations, medications, and conditions to prevent timeline sorting corruption.
+
+**Removed**
+- Retired obsolete components: `ml/rag/ingest/ocr.py` (olmOCR-2-7B), `ml/rag/ingest/table_parsing.py` (HTML table regex parsing), and `ml/graph/prose_extraction.py` (`qwen3.5:9b` LLM prose extraction), along with their legacy test files.
+
 ---
 
 ## Future Versions

@@ -8,8 +8,10 @@ this doc covers only `ml/`.
 **Status**: Core pipeline implemented and live-tested end-to-end (retrieval
 → generation → claim extraction → NLI verification → confidence scoring →
 abstention, grounded in real patient facts from Neo4j). Backend integration
-(`backend/` wiring to this layer) and the fitness/nutrition recommendation
-models are not yet built. See [Features & Status](#-features--status) below.
+(`backend/` FastAPI wiring with `GPU_LOCK` and `ml_singletons`) is fully
+implemented and tested. Unified visual extraction via `datalab-to/lift` 9.7B VLM
+replaces the previous multi-pass OCR, table parsing, and prose extraction pipeline.
+See [Features & Status](#-features--status) below.
 
 ---
 
@@ -21,14 +23,15 @@ models are not yet built. See [Features & Status](#-features--status) below.
 - **Evidence-attributed answers**: a draft LLM answer is decomposed into
   atomic claims, each independently verified via NLI (entailment/
   contradiction) against retrieved evidence — only claims that pass are
-  shown, with the exact source (document span, URL, or graph fact) attached.
+  shown, with the exact source (document citation, URL, or graph fact) attached.
 - **Longitudinal Health Graph**: structured patient facts (labs,
-  medications, conditions) in Neo4j, extracted deterministically from
-  tables and via schema-constrained LLM extraction from free text — read
-  back into chat as current-state facts and precomputed trend deltas.
-- **Document ingestion**: text PDFs (pypdf) and scanned/photographed
-  documents (olmOCR-v2 via Ollama), table-aware chunking, exact
-  character-span citation tracking.
+  medications, conditions) in Neo4j, populated directly from schema-guided
+  visual document extraction — read back into chat as current-state facts
+  and precomputed trend deltas.
+- **Document ingestion**: unified single-pass visual extraction of multi-page
+  PDFs and image documents via `datalab-to/lift` 9.7B VLM (with 4-bit NF4
+  quantization on CUDA and CPU fallback), Option A declarative clinical sentence
+  synthesis for RAG, and fast deterministic mock execution.
 - **Reference corpus ingestion**: PubMed abstracts, MedlinePlus summaries,
   USDA FoodData Central nutrition data.
 
@@ -81,11 +84,12 @@ subsystem's `experiments/RESULTS.md` (linked below).
 - Python 3.11 or 3.12, managed via [uv](https://github.com/astral-sh/uv) —
   **not** system Python (see `ml/.venv`)
 - A local [Ollama](https://ollama.ai) instance (`OLLAMA_HOST`, default
-  `http://localhost:11434`) with `medgemma:4b`, `qwen3.5:9b`, and an olmOCR-v2
-  GGUF pulled
+  `http://localhost:11434`) with `medgemma:4b` pulled
+- `datalab-to/lift` VLM model weights (loaded in-process via Hugging Face;
+  can be mocked via `PHIRE_MOCK_LIFT=true` for offline/CPU testing)
 - A local Neo4j instance for the graph layer (see `ml/.env.example` for the
   exact `podman run` command)
-- NVIDIA GPU with 8GB+ VRAM recommended (CPU works, much slower) — see
+- NVIDIA GPU with 8GB+ VRAM recommended (CPU execution fully supported) — see
   `CLAUDE.md` for this project's hardware assumptions
 
 ### Setup
@@ -104,15 +108,12 @@ cp .env.example .env   # fill in Neo4j credentials, optional API keys
 ```bash
 source .venv/bin/activate
 set -a && source .env && set +a
-python -m pytest tests/ -q
+PHIRE_MOCK_LIFT=true python -m pytest tests/ -q
 ```
 
 Most tests are pure unit tests (no live services needed). A few require a
 live local Neo4j (`test_graph_integration.py`, `test_qa_chain_live_e2e.py`)
-— they skip automatically (not error) if Neo4j isn't reachable. Several
-tests (prose extraction, the live end-to-end pipeline) call the real Ollama
-instance, not mocks — see `docs/RESEARCH_LOG.md` for why that testing
-approach was deliberate.
+— they skip automatically (not error) if Neo4j isn't reachable.
 
 ### Ingest something and ask a question
 
@@ -127,7 +128,7 @@ python -m ml.rag.ingest.ingest_patient_document /path/to/report.pdf
 ```python
 from ml.chains.qa_chain import QAChain
 
-chain = QAChain()  # loads 4 models + Neo4j connection — construct once, reuse
+chain = QAChain()  # loads models + Neo4j connection — construct once, reuse
 response = chain.answer("What was my most recent LDL cholesterol result?")
 print(response.answer)
 for claim in response.claims:
@@ -142,10 +143,11 @@ for claim in response.claims:
 - [x] Hybrid retrieval (BM25 + Chroma, MedCPT-reranked, patient-document floor)
 - [x] Claim extraction + NLI-based verification (SUPPORTED/DERIVED/CONFLICTING/UNCERTAIN/UNSUPPORTED)
 - [x] Confidence scoring + abstention
-- [x] Longitudinal Health Graph (Neo4j): Observation/Medication/Condition nodes, table + prose extraction
+- [x] Longitudinal Health Graph (Neo4j): Observation/Medication/Condition nodes, structured Lift extraction
 - [x] Graph read path feeding chat: current facts + precomputed trend deltas
-- [x] Patient document ingestion: text PDF + OCR (scanned/photographed), table-aware chunking, exact-span citations
+- [x] Patient document ingestion: unified visual extraction via `datalab-to/lift` (PDF + images), Option A RAG chunk synthesis, structured Neo4j graph writes
 - [x] Reference corpus ingestion: PubMed, MedlinePlus, USDA FoodData Central
+- [x] Backend API integration: FastAPI routers, `ml_singletons`, `GPU_LOCK` serialization, HIPAA audit logging
 - [x] Live end-to-end pipeline tests (real Ollama + Neo4j + Chroma, no fakes)
 
 **Not started**
@@ -164,9 +166,7 @@ assumed — see the linked `RESULTS.md` for methodology and numbers.
 | Purpose | Choice | Benchmark |
 |---|---|---|
 | Chat generation | `medgemma:4b` (Ollama) | [`ml/llm/`](llm/) — see `docs/ML_HANDOFF_FOR_ANIKA.md` |
-| Prose fact extraction | `qwen3.5:9b`, hand-rolled schema-constrained extraction | [`ml/graph/experiments/RESULTS.md`](graph/experiments/RESULTS.md) |
-| OCR (scanned/photographed docs) | olmOCR-v2 (Ollama) | [`ml/rag/ingest/experiments/RESULTS.md`](rag/ingest/experiments/RESULTS.md) |
-| PDF/OCR routing | RapidOCR pre-pass + pypdf | [`ml/rag/ingest/router_experiments/RESULTS.md`](rag/ingest/router_experiments/RESULTS.md) |
+| Visual document extraction | `datalab-to/lift` (9.7B VLM, 4-bit NF4 & CPU fallback) | Schema-guided extraction replacing fragmented olmOCR + table parsing + prose extraction |
 | Embeddings | MedCPT dual encoder | [`ml/rag/experiments/RESULTS.md`](rag/experiments/RESULTS.md) |
 | Reranking | MedCPT cross-encoder + authority/recency + patient-doc floor | [`ml/rag/reranker_experiments/RESULTS.md`](rag/reranker_experiments/RESULTS.md) |
 | Claim verification | BART-large-MNLI (NLI) | [`ml/claims/experiments/RESULTS.md`](claims/experiments/RESULTS.md) |
@@ -198,4 +198,4 @@ not a violation of it.
 
 ---
 
-Last updated: 2026-08-26
+Last updated: 2026-09-09

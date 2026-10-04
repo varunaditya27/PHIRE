@@ -34,8 +34,8 @@ This comprehensive audit surfaces all implemented features, remaining functional
 | **Backend** | HIPAA Audit Logging | Dual PostgreSQL `audit_log` and local append-only log file with fail-safe error handling ([`backend/app/security.py`](file:///home/varun/Projects/PHIRE/backend/app/security.py), [`backend/app/services/audit_logger.py`](file:///home/varun/Projects/PHIRE/backend/app/services/audit_logger.py)). |
 | **ML** | Hybrid Retrieval & Reranking | MedCPT Query/Article dual encoder + BM25Okapi + MedCPT Cross-Encoder with structural patient floor ([`ml/rag/`](file:///home/varun/Projects/PHIRE/ml/rag/)). |
 | **ML** | Reference Ingestors | Live API ingestors for MedlinePlus XML, PubMed NCBI E-utilities, and USDA FoodData Central ([`ml/rag/ingest/`](file:///home/varun/Projects/PHIRE/ml/rag/ingest/)). |
-| **ML** | Vision OCR & Table Parser | Local Ollama vision client (`olmOCR-2-7B-1025`) and deterministic stdlib HTML table parser ([`ml/rag/ingest/ocr.py`](file:///home/varun/Projects/PHIRE/ml/rag/ingest/ocr.py), [`ml/rag/ingest/table_parsing.py`](file:///home/varun/Projects/PHIRE/ml/rag/ingest/table_parsing.py)). |
-| **ML** | Longitudinal Health Graph | Neo4j graph client, deterministic table observations, grammar-constrained prose extraction (`qwen3.5:9b`), and trend delta computation ([`ml/graph/`](file:///home/varun/Projects/PHIRE/ml/graph/)). |
+| **ML** | Visual Document Extraction | Schema-guided visual extraction of multi-page PDFs and images via `datalab-to/lift` 9.7B VLM with Option A declarative RAG chunk synthesis ([`ml/rag/ingest/lift_extractor.py`](file:///home/varun/Projects/PHIRE/ml/rag/ingest/lift_extractor.py), [`ml/rag/ingest/lift_schema.py`](file:///home/varun/Projects/PHIRE/ml/rag/ingest/lift_schema.py), [`ml/rag/ingest/chunk_synthesizer.py`](file:///home/varun/Projects/PHIRE/ml/rag/ingest/chunk_synthesizer.py)). |
+| **ML** | Longitudinal Health Graph | Neo4j graph client, structured observation/medication/condition builders populated directly from Lift VLM extraction, and trend delta computation ([`ml/graph/`](file:///home/varun/Projects/PHIRE/ml/graph/)). |
 | **ML** | Claim Verification | BART-large-MNLI claim verifier with calibrated entailment/contradiction thresholds and confidence formula ([`ml/claims/`](file:///home/varun/Projects/PHIRE/ml/claims/)). |
 
 ### 2.2 Remaining & Stubbed Functionalities
@@ -44,8 +44,8 @@ This comprehensive audit surfaces all implemented features, remaining functional
    - `GET /api/recommendations/fitness` and `GET /api/recommendations/nutrition` return `501 Not Implemented`.
 2. **Multi-Hop Graph-RAG Retrieval**:
    - Query-time relational entity graph traversal (e.g., cross-referencing medication dose changes directly against observation deltas) is documented in [`docs/GRAPH_SCHEMA_ROADMAP.md`](file:///home/varun/Projects/PHIRE/docs/GRAPH_SCHEMA_ROADMAP.md) but unbuilt.
-3. **Scanned PDF Fallback Router**:
-   - `PDFTextExtractor` fails on image-only scanned PDFs (no embedded text layer). RapidOCR + `pypdf` agreement check and PyMuPDF rasterization router ([`docs/PDF_INGESTION_ROADMAP.md`](file:///home/varun/Projects/PHIRE/docs/PDF_INGESTION_ROADMAP.md)) is designed but not yet implemented.
+3. **Scanned PDF Fallback Router (RESOLVED)**:
+   - **Resolved by `datalab-to/lift` integration**: The 9.7B parameter VLM performs unified single-pass visual document extraction directly on both native digital PDFs and scanned image-only PDFs/photos, rendering OCR routing workarounds obsolete.
 4. **Backend Document Listing Endpoint (`GET /api/documents`)**:
    - No route exists to query all uploaded documents from PostgreSQL. The frontend uses a client-side `localStorage` cache workaround.
 5. **Chat History Persistence Endpoint (`GET /api/chat/messages`)**:
@@ -112,7 +112,7 @@ This comprehensive audit surfaces all implemented features, remaining functional
 `ml.local_only.require_localhost()` strictly validates that outbound service hostnames resolve to `{"localhost", "127.0.0.1", "::1"}` to eliminate DNS rebinding and cloud data egress. To satisfy this inside Docker without custom code exceptions, `backend` and `nginx` run with `network_mode: host` in `docker-compose.yml`.
 
 ### 5.2 GPU Serialization Lock (`GPU_LOCK`)
-To prevent CUDA Out-Of-Memory (OOM) crashes on consumer GPUs (e.g. 8GB VRAM) when chat generation (`medgemma:4b` + `facebook/bart-large-mnli`) and document ingestion (`olmOCR-2-7B` + `qwen3.5:9b` + `MedCPT`) run concurrently, a process-wide `GPU_LOCK` in [`backend/app/services/ml_singletons.py`](file:///home/varun/Projects/PHIRE/backend/app/services/ml_singletons.py) serializes all GPU operations.
+To prevent CUDA Out-Of-Memory (OOM) crashes on consumer GPUs (e.g. 8GB VRAM) when chat generation (`medgemma:4b` + `facebook/bart-large-mnli`) and document ingestion (`datalab-to/lift` 4-bit NF4 VLM + `MedCPT`) run concurrently, a process-wide `GPU_LOCK` in [`backend/app/services/ml_singletons.py`](file:///home/varun/Projects/PHIRE/backend/app/services/ml_singletons.py) serializes all GPU operations.
 
 ### 5.3 Tripartite Data Storage Separation
 1. **PostgreSQL**: Upload metadata (`documents`), conversations (`chat_messages`), queryable claim audit rows (`claims`), and access logs (`audit_log`).

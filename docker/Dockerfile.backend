@@ -21,9 +21,8 @@
 FROM python:3.11-slim
 
 # libpq-dev + build-essential for psycopg2 and any ml/ deps needing a
-# native build. Neither backend nor ml/'s OCR path (olmOCR via Ollama,
-# rapidocr-onnxruntime) needs the system tesseract-ocr binary -- verified
-# against ml/requirements.txt and ml/rag/ingest/ocr.py.
+# native build. Visual document extraction (datalab-to/lift) runs in-process
+# via PyTorch and does not need the system tesseract-ocr binary.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     build-essential \

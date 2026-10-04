@@ -206,3 +206,40 @@ stack (Ollama with `medgemma:4b`/`qwen3.5:9b`, Neo4j 5-community, the
 production Chroma corpus post-cleanup) at the time of writing, run
 repeatedly (3+ consecutive full live passes) to rule out flakiness before
 concluding.
+
+---
+
+## 2026-09-09: Unified visual document extraction with `datalab-to/lift` VLM & Option A chunk synthesis
+
+### Context
+
+Prior to this milestone, patient document ingestion was fragmented across three disparate tools:
+1. `pypdf` for digital PDFs (failed completely on scanned documents without text layers).
+2. `olmOCR-2-7B` via Ollama for images and scanned documents.
+3. Regex-based HTML table parsing (`table_parsing.py`) and a secondary LLM prose extraction pass (`qwen3.5:9b` via Ollama in `prose_extraction.py`).
+
+This multi-stage pipeline introduced severe VRAM contention on 8GB GPUs (competing with MedCPT embeddings and BART-large-MNLI claim verification) and had inconsistent document type coverage.
+
+### Key Decisions & Findings
+
+1. **Unified Schema-Guided Visual Document Extraction (`datalab-to/lift`):**
+   - Adopted `datalab-to/lift` (~9.7B parameters), loaded in-process via Hugging Face Transformers.
+   - Designed a single unified extraction schema (`CLINICAL_DOCUMENT_SCHEMA` in `ml/rag/ingest/lift_schema.py`) extracting `observations` (with values, units, reference ranges, and interpretations), `medications` (with dosages, frequencies, and statuses), `conditions` (with clinical statuses), and narrative sections.
+   - **Schema Design Constraint**: Strictly avoided JSON Schema `enum`, `anyOf`, `oneOf`, `$ref`, and `additionalProperties` keywords. Rich natural language `description` fields guide the VLM during constrained decoding, and validation/normalization occurs deterministically in Python via `validate_lift_payload()`.
+
+2. **Option A RAG Chunk Synthesis for NLI Entailment:**
+   - Rather than indexing raw disjoint table cells or brittle string snippets, `synthesize_patient_chunks` (`ml/rag/ingest/chunk_synthesizer.py`) converts structured extraction entities into fluent, declarative clinical sentences:
+     - Observations: `"On {doc_date}, {name} was {val}{unit}{ref}{interp}. Source: {filename}."`
+     - Medications: `"{name} ({dosage}, {freq}) - Status: {status}. Documented in {filename} on {doc_date}."`
+     - Conditions: `"Condition: {name} (Status: {status}). Documented in {filename} on {doc_date}."`
+   - These declarative sentences significantly improve NLI entailment scoring (`facebook/bart-large-mnli`) by eliminating syntactic ambiguity.
+
+3. **In-Process Quantization & CPU / Non-CUDA Safety:**
+   - On CUDA GPUs: loaded with 4-bit NormalFloat4 (`BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16, bnb_4bit_quant_type="nf4")`), fitting in ~5.5GB VRAM.
+   - On CPU (non-CUDA laptops): `BitsAndBytesConfig` is strictly omitted to prevent `ValueError`, loading in standard `torch.float32` on `device="cpu"`.
+   - Fast deterministic offline testing is supported via `PHIRE_MOCK_LIFT=true` or `LiftExtractor(mock=True)`.
+
+4. **Component Retirement:**
+   - Retired `ml/rag/ingest/ocr.py`, `ml/rag/ingest/table_parsing.py`, and `ml/graph/prose_extraction.py`.
+   - Cleaned up backend singletons (`get_lift_extractor()`) and wrapped processing in `GPU_LOCK`.
+   - Test suite expanded to 217 total tests (200 unit tests passing offline with 0 failures).

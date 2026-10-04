@@ -1,58 +1,80 @@
 """
-Text extraction from patient-uploaded documents.
-
-Pluggable by design: PDFTextExtractor handles text-based PDFs;
-OCRTextExtractor (ml/rag/ingest/ocr.py) handles scanned/photographed
-images via olmOCR-v2 run locally through Ollama — model choice
-benchmarked in experiments/RESULTS.md, not assumed. Adding another format
-later means adding another TextExtractor to DEFAULT_EXTRACTORS, without
-touching the ingestion pipeline around it (ingest_patient_document.py only
-calls extract_text, never a concrete extractor class directly).
+Document extraction routing via LiftExtractor.
+Replaces previous pypdf and olmOCR split with unified visual extraction.
 """
 
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
-import pypdf
+from ml.rag.ingest.lift_extractor import SUPPORTED_EXTENSIONS, LiftExtractor
 
-from ml.rag.ingest.ocr import OCRTextExtractor
+_DEFAULT_EXTRACTOR = LiftExtractor()
+
+
+def supports_document(file_path: Path) -> bool:
+    return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
+
+
+def extract_document_data(file_path: Path, extractor: LiftExtractor | None = None) -> dict[str, Any]:
+    ext = extractor or _DEFAULT_EXTRACTOR
+    return ext.extract(file_path)
 
 
 class TextExtractor(Protocol):
-    """Extracts plain text from one patient-uploaded document file."""
+    """Extracts plain text from one patient-uploaded document file (backward compatibility)."""
 
     def supports(self, file_path: Path) -> bool: ...
     def extract(self, file_path: Path) -> str: ...
 
 
-class PDFTextExtractor:
-    """Extracts embedded text from text-based PDFs via pypdf.
+def _format_extracted_data(data: dict[str, Any]) -> str:
+    lines = []
+    if data.get("document_date"):
+        lines.append(f"Date: {data['document_date']}")
+    if data.get("document_type"):
+        lines.append(f"Document Type: {data['document_type']}")
+    for obs in data.get("observations", []):
+        unit = f" {obs['unit']}" if obs.get("unit") else ""
+        ref = f" (Reference Range: {obs['reference_range']})" if obs.get("reference_range") else ""
+        interp = f" -- {obs['interpretation']}" if obs.get("interpretation") else ""
+        lines.append(f"{obs.get('name')}: {obs.get('value')}{unit}{ref}{interp}".strip())
+    for med in data.get("medications", []):
+        dose = f" {med['dosage']}" if med.get("dosage") else ""
+        freq = f" {med['frequency']}" if med.get("frequency") else ""
+        status = f" ({med['status']})" if med.get("status") else ""
+        lines.append(f"Medication: {med.get('name')}{dose}{freq}{status}".strip())
+    for cond in data.get("conditions", []):
+        status = f" ({cond['status']})" if cond.get("status") else ""
+        lines.append(f"Condition: {cond.get('name')}{status}".strip())
+    for sec in data.get("narrative_sections", []):
+        lines.append(f"[{sec.get('heading', 'Note')}] {sec.get('content', '')}".strip())
+    return "\n\n".join(lines).strip()
 
-    Does not perform OCR — a scanned/photographed PDF (embedded images,
-    no text layer) extracts as empty or near-empty text. extract_text()
-    routes purely on file extension, matching this extractor first for
-    any .pdf regardless of content, so a scanned PDF does NOT fall
-    through to OCRTextExtractor (which only supports raw image formats —
-    see its SUPPORTED_SUFFIXES) — that combination is a known gap, not
-    yet handled by either extractor. Surfaced explicitly by returning ""
-    rather than silently indexing garbage — see
-    ingest_patient_document.py's handling of an empty extraction result.
-    """
+
+class PDFTextExtractor:
+    """Backward-compatible PDF extractor adapter."""
+
+    def __init__(self, extractor: LiftExtractor | None = None) -> None:
+        self._extractor = extractor or _DEFAULT_EXTRACTOR
 
     def supports(self, file_path: Path) -> bool:
         return file_path.suffix.lower() == ".pdf"
 
     def extract(self, file_path: Path) -> str:
-        reader = pypdf.PdfReader(str(file_path))
-        return "\n\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        data = self._extractor.extract(file_path)
+        return _format_extracted_data(data)
 
 
-DEFAULT_EXTRACTORS: list[TextExtractor] = [PDFTextExtractor(), OCRTextExtractor()]
+DEFAULT_EXTRACTORS: list[TextExtractor] = [PDFTextExtractor()]
 
 
 def extract_text(file_path: Path, extractors: list[TextExtractor] | None = None) -> str:
-    """Route file_path to the first extractor that supports its format."""
-    for extractor in extractors or DEFAULT_EXTRACTORS:
-        if extractor.supports(file_path):
-            return extractor.extract(file_path)
-    raise ValueError(f"No extractor available for {file_path.suffix!r} files: {file_path}")
+    """Backward-compatible text extraction routing."""
+    if extractors:
+        for extractor in extractors:
+            if extractor.supports(file_path):
+                return extractor.extract(file_path)
+        raise ValueError(f"No extractor available for {file_path.suffix!r} files: {file_path}")
+
+    data = extract_document_data(file_path)
+    return _format_extracted_data(data)

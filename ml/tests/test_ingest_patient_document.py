@@ -1,6 +1,6 @@
 """
 Unit tests for ml/rag/ingest/ingest_patient_document.py's chunk-building
-logic, using the same PDF fixture as test_patient_documents.py.
+logic, using LiftExtractor mock execution.
 """
 
 from pathlib import Path
@@ -10,6 +10,11 @@ import pytest
 from ml.rag.ingest.ingest_patient_document import build_chunks
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "sample_lab_report.pdf"
+
+
+@pytest.fixture(autouse=True)
+def mock_lift_env(monkeypatch):
+    monkeypatch.setenv("PHIRE_MOCK_LIFT", "true")
 
 
 class EmptyTextExtractor:
@@ -44,3 +49,31 @@ def test_build_chunks_ids_are_stable_across_runs():
 def test_build_chunks_raises_on_empty_extraction():
     with pytest.raises(ValueError, match="No text extracted"):
         build_chunks(FIXTURE_PATH, extractors=[EmptyTextExtractor()])
+
+
+def test_build_chunks_with_preextracted_data():
+    custom_data = {
+        "document_date": "2026-04-01",
+        "document_type": "Progress Note",
+        "observations": [
+            {"name": "Systolic BP", "value": "120", "unit": "mmHg"}
+        ],
+        "medications": [],
+        "conditions": [],
+        "narrative_sections": [],
+    }
+    chunks = build_chunks(FIXTURE_PATH, data=custom_data)
+    assert len(chunks) == 1
+    assert "Systolic BP was 120 mmHg" in chunks[0].text
+    assert chunks[0].metadata["document_date"] == "2026-04-01"
+
+
+def test_build_chunks_with_text_backward_compatibility():
+    chunks = build_chunks(FIXTURE_PATH, text="Patient report summary text")
+    assert len(chunks) >= 1
+    assert any("Patient report summary text" in c.text for c in chunks)
+
+
+def test_build_chunks_raises_on_empty_data():
+    with pytest.raises(ValueError, match="No content extracted"):
+        build_chunks(FIXTURE_PATH, data={})

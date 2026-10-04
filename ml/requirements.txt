@@ -23,3 +23,8 @@ neo4j
 
 # --- Testing ---
 pytest
+
+# --- Visual Document Extraction (Lift VLM) ---
+lift-pdf[hf]>=0.1.0
+bitsandbytes>=0.43.0
+accelerate>=0.28.0

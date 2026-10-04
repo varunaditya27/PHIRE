@@ -147,7 +147,7 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
   INFERRED (multi-hop reasoning claims) is explicitly not implemented —
   no validated signal exists for it yet.
 
-**8a. Prose fact extraction: hand-rolled vs. Google LangExtract** — *benchmark, hand-rolled adopted*
+**8a. Prose fact extraction: hand-rolled vs. Google LangExtract** — *benchmark, hand-rolled qwen3.5:9b originally adopted; superseded by datalab-to/lift*
 - **LangExtract**: [google/langextract](https://github.com/google/langextract),
   Apache 2.0, verified real (38k+ stars, actively maintained). Source-grounds
   every extraction to its exact character span — genuinely valuable, but its
@@ -161,11 +161,9 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
   0.667-0.833) — consistently across all three paired models, pointing at
   the method (loose JSON vs. real schema constraints) rather than any one
   model. **`qwen3.5:9b` matched `qwen3.5:27b` exactly while running ~13x
-  faster** (24.8s vs. 322.8s) on a third of the VRAM footprint — adopted
-  as the production model. Full results: `ml/graph/experiments/RESULTS.md`.
-- **PHIRE Role**: `ml/graph/prose_extraction.py` — extracts medications/
-  conditions/observations from free-text document sections into the
-  Longitudinal Health Graph.
+  faster** (24.8s vs. 322.8s) on a third of the VRAM footprint — originally
+  adopted as the prose extraction model. Full results: `ml/graph/experiments/RESULTS.md`.
+- **Status (superseded)**: both methods superseded by `datalab-to/lift` (9.7B VLM, see entry 14b below), which performs unified schema-guided visual document extraction across both tabular and free-text clinical data in a single pass without needing separate prose extraction passes.
 
 **9. Medical Graph RAG**
 - **Paper**: [ACL 2025](https://aclanthology.org/2025.acl-long.1381.pdf)
@@ -242,15 +240,11 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 - **GitHub**: [DS4SD/docling](https://github.com/DS4SD/docling)
 - **License**: MIT
 - **Functionality**: PDF → structured text + tables + figures
-- **Rejected because**: not needed — `pypdf` handles text-based PDFs
-  directly (`ml/rag/ingest/patient_documents.py`'s `PDFTextExtractor`),
-  and table structure comes from olmOCR-v2 emitting HTML tables in its
-  transcription (parsed by `ml/rag/ingest/table_parsing.py`), not from a
-  dedicated layout-extraction library. No benchmark was run against
-  Docling specifically — the pypdf+olmOCR combination simply covered both
-  needs (text extraction, table structure) without adding a third
-  dependency.
-- **PHIRE Role (actual)**: text-based PDF lab report extraction — pypdf
+- **Rejected because**: not needed — `datalab-to/lift` (9.7B VLM) performs
+  direct schema-guided visual document extraction across both digital and scanned
+  PDFs as well as images, extracting text, structured tables, medications, and
+  conditions in a single pass without requiring an external PDF layout library.
+- **PHIRE Role (actual)**: visual document extraction — `datalab-to/lift` (see entry 14b)
 
 **13. PyMuPDF (fitz)** — *Not adopted*
 - **License**: AGPL (proprietary option available)
@@ -274,23 +268,17 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 - **Integration**: Docker container or system package
 - **Why PHIRE**: Common for older medical reports; character-recognition-only, no layout/table understanding
 
-**14a. olmOCR-v2 (Allen AI)** — *Adopted*
+**14a. olmOCR-v2 (Allen AI)** — *Superseded by datalab-to/lift*
 - **HuggingFace**: [allenai/olmOCR-2-7B-1025](https://huggingface.co/allenai/olmOCR-2-7B-1025)
 - **License**: Apache 2.0
-- **Functionality**: Vision-language model fine-tuned for document-to-text
-  conversion — understands page layout, tables (converts to HTML), and
-  mixed prose/list content, not just character recognition
-- **PHIRE Role**: OCR extractor for `ml/rag/ingest/patient_documents.py`
-  (scanned/photographed patient documents PDFTextExtractor can't handle)
-- **Deployment**: Runs locally via Ollama (Q4_K_M quantization,
-  `bartowski`'s GGUF build, ~6GB), consistent with PHIRE's existing
-  Ollama-based local-LLM pattern
-- **Why PHIRE**: Benchmarked against olmOCR-v1 and Q8_0 quantization
-  across 4 candidates, 12 test images (grid tables, two-column layout,
-  narrative prose, clean + simulated phone-photo variants) —
-  content-normalized CER 0.012 (vs v1's 0.11-0.14) and perfect field-level
-  accuracy on all clinically critical values. See
-  `ml/rag/ingest/experiments/RESULTS.md` for full methodology and results.
+- **Status**: Previously adopted for OCR of scanned/photographed documents. Superseded on 2026-09-09 by `datalab-to/lift`, which provides single-pass unified visual extraction directly into structured clinical JSON schemas without requiring separate OCR, HTML table regex parsing, or secondary LLM prose extraction.
+
+**14b. datalab-to/lift (Datalab)** — *Adopted*
+- **HuggingFace**: [datalab-to/lift](https://huggingface.co/datalab-to/lift)
+- **License**: Apache 2.0
+- **Functionality**: 9.7B parameter vision-language model purpose-built for schema-guided visual document extraction. Directly compiles a JSON schema into token-level decoding grammars to emit guaranteed-valid structured JSON from multi-page PDFs and images in a single pass.
+- **PHIRE Role**: Core document extractor (`ml/rag/ingest/lift_extractor.py`, `ml/rag/ingest/lift_schema.py`). Extracts observations, reference ranges, interpretations/flags, medications, and conditions directly into structured records for Neo4j and Option A RAG sentence synthesis.
+- **Deployment**: In-process via Hugging Face (`lift-pdf[hf]`). Runs 4-bit NF4 quantization on CUDA via `BitsAndBytesConfig` (~6GB VRAM footprint under `GPU_LOCK`), with graceful CPU execution (`torch.float32`) on non-CUDA machines and deterministic mock execution via `PHIRE_MOCK_LIFT=true`.
 
 ---
 
@@ -595,16 +583,16 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 
 ### Core (`ml/` — implemented)
 ✅ Adopted:
-- Ollama (medgemma:4b chat/extraction, qwen3.5:9b prose extraction, olmOCR-v2 OCR)
+- Ollama (medgemma:4b chat/claim extraction)
+- datalab-to/lift (9.7B VLM for schema-guided visual document extraction)
 - Chroma, MedCPT (embeddings + cross-encoder reranking), rank_bm25
 - BART-large-MNLI (claim verification), Neo4j (direct Cypher, not LightRAG)
-- pypdf (text PDF extraction)
 - PyTorch, scikit-learn (available; not yet used for recommendations)
 
-❌ Not adopted (evaluated, see entries above for why): LangChain, MedRAGChecker, Docling
+❌ Not adopted (evaluated, see entries above for why): LangChain, MedRAGChecker, Docling, olmOCR-v2 (superseded by Lift)
 
-### Not yet built (backend/frontend scope)
-- FastAPI, PostgreSQL, Docker Compose, Next.js — see `docs/ML_HANDOFF_FOR_ANIKA.md`
+### Built (backend/frontend scope)
+- FastAPI, PostgreSQL, Docker Compose, Next.js — fully built and integrated
 
 ### Phase 2
 ➕ Add:
@@ -637,12 +625,12 @@ PHIRE integrates 30+ open-source tools across RAG, computer vision, medical LLMs
 |------|---------|-----------|---|---|
 | Ollama | MIT | ✅ | Yes (local) | ✅ |
 | MedGemma (4B) | Gemma | ✅ | Yes (local) | ✅ |
+| datalab-to/lift | Apache 2.0 | ✅ | Yes (local) | ✅ |
 | Chroma | Apache 2.0 | ✅ | Yes (local) | ✅ |
 | MedCPT | Apache 2.0 | ✅ | Yes (local) | ✅ |
 | BART-large-MNLI | Apache 2.0/MIT (facebook/bart-large-mnli on Hugging Face) | ✅ | Yes (local) | ✅ |
 | Neo4j (Community) | GPLv3 | ✅ (self-hosted) | Yes (local) | ✅ |
-| pypdf | BSD | ✅ | Yes | ✅ |
-| olmOCR-v2 | Apache 2.0 | ✅ | Yes (local via Ollama) | ✅ |
+| olmOCR-v2 | Apache 2.0 | ✅ | Yes (local via Ollama) | ❌ Superseded by Lift |
 | Docling | MIT | ✅ | Yes | ❌ not adopted |
 | LangChain | MIT | ✅ | Partial (requires Ollama) | ❌ not adopted |
 | MedRAGChecker | Apache 2.0 (claimed by paper) | ✅ | Yes (local) | ❌ not adopted — not pip-installable |
@@ -694,16 +682,17 @@ Consider contributing back:
 
 ## Quick Integration Checklist
 
-- [x] Ollama + medgemma:4b + qwen3.5:9b + olmOCR-v2 running locally
+- [x] Ollama + medgemma:4b running locally
+- [x] datalab-to/lift 9.7B VLM integrated for unified schema-guided document extraction
 - [x] Chroma vector DB initialized
 - [x] MedCPT embedding + reranking models in use (not Sentence-Transformers' originally-listed models)
 - [x] NLI-based claim verification implemented (`ml/claims/verifier.py`, BART-large-MNLI) — not MedRAGChecker (never installable)
-- [x] pypdf + olmOCR-v2 extraction pipeline (not Docling)
+- [x] Unified visual extraction pipeline (`ml/rag/ingest/lift_extractor.py`) with Option A RAG chunk synthesis
 - [x] Neo4j graph layer (`ml/graph/`) — direct Cypher, not LightRAG
+- [x] FastAPI endpoints wired to `ml/` (backend scope, fully integrated)
+- [x] PostgreSQL schema with SQLAlchemy & Alembic migrations
+- [x] Docker Compose full-stack services defined
 - [ ] Multi-hop graph-RAG retrieval (LightRAG or alternative) — **outstanding, not yet started**, see `docs/GRAPH_SCHEMA_ROADMAP.md` §3f
-- [ ] FastAPI endpoints wired to `ml/` (backend scope, not started)
-- [ ] PostgreSQL schema (Chroma is the vector store, not pgvector)
-- [ ] Docker Compose services defined
 - [ ] MediaPipe Pose (CV extension, not started)
 - [ ] YOLOv8 (CV extension, not started)
 - [ ] Open Wearables docs reviewed (not started)
@@ -711,6 +700,6 @@ Consider contributing back:
 
 ---
 
-**Status**: Core `ml/` tool choices implemented and benchmarked (see `ml/README.md`); backend/frontend/CV-extension tools not yet integrated
+**Status**: Core `ml/`, `backend/`, and `frontend/` integrated. Unified visual document extraction powered by `datalab-to/lift` VLM.
 **Next**: See `ml/README.md`'s Features & Status, and `docs/AGGRESSIVE_ROADMAP.md`'s Extended Roadmap for what's next
 

@@ -82,52 +82,46 @@ ever looks like it's ignoring older patient history during verification
 (as opposed to generation, which still sees full history), this cap is
 why.
 
-### 1.2 Ingesting a patient document — `ml.rag.ingest.ingest_patient_document`
+### 1.2 Ingesting a patient document — `ml.rag.ingest.patient_documents` & `ingest_patient_document`
 
 ```python
 from pathlib import Path
+from ml.rag.ingest.patient_documents import extract_document_data
 from ml.rag.ingest.ingest_patient_document import build_chunks
 from ml.rag.retriever import HybridRetriever
 
-chunks = build_chunks(Path("/path/to/uploaded/file.pdf"))  # or .jpg/.png
+# 1. Extract structured clinical data via Lift VLM (single pass)
+data = extract_document_data(Path("/path/to/uploaded/file.pdf"))  # digital PDF, scanned PDF, or image
+
+# 2. Build Option A declarative clinical sentence chunks and index into Chroma/BM25
+chunks = build_chunks(Path("/path/to/uploaded/file.pdf"), data=data, document_id="doc123")
 HybridRetriever().add_documents(chunks)
 ```
 
-That indexes the document for retrieval (Chroma + BM25). It does **not**
-write structured facts to the graph — that's a separate step, because
-prose extraction (an LLM call) is comparatively expensive and you may not
-always want it. To do both (what the CLI script does), see
-`ml/rag/ingest/ingest_patient_document.py`'s `main()` for the exact
-sequence — order matters (§5.3).
+Unified visual extraction via `datalab-to/lift` extracts structured clinical observations (with reference ranges and flags), medications, conditions, and narrative sections from both digital and scanned PDFs/images in a single pass.
 
-Or just shell out to the script directly, which does everything
-(chunking, embedding, indexing, graph extraction) in the right order:
+Or run the CLI script directly, which handles extraction, chunking, indexing, and Neo4j graph writes:
 
 ```bash
 ml/.venv/bin/python -m ml.rag.ingest.ingest_patient_document /path/to/file.pdf
 ```
 
-Accepts: text-based PDF, or `.jpg`/`.jpeg`/`.png` (routed to OCR). A
-**scanned PDF** (image content saved with a `.pdf` extension) is **not**
-handled by either path yet — it'll extract as empty text and raise. If
-your upload endpoint needs to support that, it needs a real fix in
-`ml/rag/ingest/patient_documents.py`, not a backend-side workaround.
+Accepts: digital PDFs, scanned PDFs (no embedded text layer), and images (`.jpg`, `.jpeg`, `.png`, `.webp`).
 
 ---
 
 ## 2. Infrastructure this depends on
 
-### 2.1 Ollama (LLM serving — your existing Week 1 responsibility)
+### 2.1 Ollama (LLM serving)
 
-Production model requirements — **only these three need to be pulled**,
-not everything visible in `ollama list` on this dev machine (most of
-those are benchmark candidates, not production dependencies):
+Production model requirement:
 
 | Purpose | Model | Config env var |
 |---|---|---|
 | Chat generation | `medgemma:4b` | `OLLAMA_MODEL` |
-| OCR (scanned/photographed documents) | `hf.co/bartowski/allenai_olmOCR-2-7B-1025-GGUF:Q4_K_M` | `OCR_MODEL` |
-| Prose fact extraction (medications/conditions from free text) | `qwen3.5:9b` | `PROSE_EXTRACTION_MODEL` |
+
+Visual document extraction uses `datalab-to/lift` (9.7B VLM), loaded in-process via Hugging Face with 4-bit NF4 quantization on CUDA and CPU fallback (`LIFT_MODEL`, `LIFT_DEVICE`, `PHIRE_MOCK_LIFT`).
+
 
 All benchmarked, not guessed — see `ml/claims/experiments/RESULTS.md`
 (model choices generally), `ml/rag/ingest/experiments/RESULTS.md` (OCR),
@@ -246,21 +240,20 @@ in that case, not a wrong guess. Check for `None` before using it.
 
 ## 5. Known limitations / things that will bite you if assumed away
 
-1. **GPU memory ordering matters.** On an 8GB GPU, running OCR
-   extraction, prose extraction, and the embedding model back-to-back in
-   one process without releasing VRAM between them will OOM-crash —
-   verified live, not theoretical. `ingest_patient_document.py`'s
-   `main()` handles this correctly (all Ollama calls finish, with
-   `keep_alive: 0`, before the embedding model loads) — if you build
-   your own orchestration around these pieces instead of calling that
-   script, preserve that ordering.
+1. **GPU memory concurrency.** On an 8GB GPU, Lift VLM (loaded
+   with 4-bit NF4 quantization) shares VRAM with the MedCPT embedding,
+   reranker, and BART claim verifier. Backend document processing wraps
+   Lift extraction in `GPU_LOCK` (`backend/app/services/document_processor.py`)
+   to prevent simultaneous GPU operations from triggering out-of-memory errors.
+   On CPU/non-CUDA setups, Lift runs in full float32 without `BitsAndBytesConfig`.
 2. **DERIVED and INFERRED claim statuses are not implemented.** Only
    `SUPPORTED`/`CONFLICTING`/`UNCERTAIN`/`UNSUPPORTED` exist. A claim that
    requires computing something from raw values, or multi-hop reasoning,
    currently just falls into `UNCERTAIN` rather than being specially
    handled — documented gap in `ml/claims/verifier.py`, not a bug.
-3. **A scanned PDF (not a photo, an actual PDF with no text layer) isn't
-   handled by anything yet** — see §1.2.
+3. **Scanned PDFs and image-based documents are fully supported** —
+   `datalab-to/lift` visual extraction natively processes scanned PDFs,
+   photos, and digital PDFs alike into unified structured schema output.
 4. **The cross-encoder reranker is sensitive to phrasing** in ways that
    might surprise you: "what was my LDL cholesterol result?" and "What is
    my LDL cholesterol result?" (same meaning) scored measurably
@@ -274,20 +267,12 @@ in that case, not a wrong guess. Check for `None` before using it.
 6. **No retry/backoff on external API calls** (PubMed, MedlinePlus, USDA)
    beyond what's already in `ml/rag/ingest/run_ingest.py` (per-topic
    failure is logged and skipped, not retried).
-7. **Prose extraction degrades silently to "no facts found," not an
-   exception.** If Ollama is unreachable or returns something
-   unparseable during `extract_facts()` (`ml/graph/prose_extraction.py`),
-   ingestion doesn't crash — medications/conditions/prose-derived
-   observations for that document just come back empty (a warning is
-   printed, not raised). Table-derived observations and chunk indexing
-   are unaffected either way (they don't depend on this call). If your
-   upload endpoint wants to surface "graph extraction partially failed"
-   to the user, you'll need to check for an empty facts result yourself —
-   `ml/` won't raise for you here by design (a transient LLM hiccup
-   shouldn't fail the whole document upload). The one exception:
-   a misconfigured `OLLAMA_HOST` pointing off-box raises `ValueError`
-   from this same call path, uncaught — that's deliberate (§5.8's
-   privacy-boundary check must never silently degrade).
+7. **Document extraction validation.** Lift VLM outputs are validated
+   against `CLINICAL_DOCUMENT_SCHEMA` via `validate_lift_payload()`
+   (`ml/rag/ingest/lift_schema.py`). Missing or non-dict items are
+   sanitized to empty lists rather than crashing ingestion. If a document
+   contains no extractable clinical entities, observations, medications,
+   and conditions simply return empty.
 8. **Keep `data/chroma` free of test/eval fixture documents.** Found live
    2026-08-25: benchmark ingestion runs (OCR/reranker experiments) had
    left 21 chunks from a synthetic "R. Thompson" patient permanently
@@ -326,7 +311,7 @@ this doc:
 
 - `ml/rag/experiments/RESULTS.md` — embedding model (MedCPT)
 - `ml/claims/experiments/RESULTS.md` — claim verification NLI model (BART-large-MNLI)
-- `ml/rag/ingest/experiments/RESULTS.md` — OCR model (olmOCR-v2)
-- `ml/graph/experiments/RESULTS.md` — prose extraction method/model (HandRolled + qwen3.5:9b)
+- `ml/rag/ingest/experiments/RESULTS.md` — historical OCR benchmark (olmOCR-v2, superseded by `datalab-to/lift`)
+- `ml/graph/experiments/RESULTS.md` — historical prose extraction benchmark (HandRolled + qwen3.5:9b, superseded by `datalab-to/lift`)
 - `ml/rag/reranker_experiments/RESULTS.md` — reranker weight tuning + the patient-document floor fix
 - `docs/GRAPH_SCHEMA_ROADMAP.md` — what's deliberately deferred in the graph schema, and the trigger condition for each

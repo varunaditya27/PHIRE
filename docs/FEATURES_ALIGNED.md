@@ -43,9 +43,9 @@ Plus **Computer Vision extensions** for multimodal health tracking:
 - **Status**: ✅ Done for lab values (`ml/graph/`); dietary manual-entry ingestion not built
 
 **4. Laboratory Report Explanation** (NLP-06 §1, Objectives)
-- PDF report parsing (pypdf for text PDFs, olmOCR-v2 for scanned/photographed documents — not Docling)
-- Automatic value extraction
-- Report summarization
+- PDF & image report parsing (unified schema-guided visual extraction via `datalab-to/lift` 9.7B VLM with 4-bit NF4 and CPU fallback)
+- Automatic value extraction directly into structured observation records
+- Report summarization & Option A declarative clinical sentence chunking
 - Plain-language explanations
 - **Status**: ✅ Done (`ml/rag/ingest/`)
 
@@ -283,11 +283,11 @@ From NLP-06 §4 (Later Extensions):
 ## Open-Source Tools Integrated
 
 ### Core Infrastructure
-- **Ollama** (local LLM serving) — medgemma:4b (chat), qwen3.5:9b (prose extraction), olmOCR-v2 (OCR)
+- **Ollama** (local LLM serving) — medgemma:4b (chat & claim extraction)
+- **datalab-to/lift** (9.7B VLM schema-guided document extraction with 4-bit NF4 & CPU fallback)
 - **Chroma** (vector DB, in-process)
-- **pypdf + olmOCR-v2** (PDF/OCR extraction — not Docling)
 - **FastAPI** (backend)
-- **Next.js 15** (frontend)
+- **Next.js 16** (frontend)
 - **PostgreSQL** (data persistence)
 
 ### Evidence Attribution

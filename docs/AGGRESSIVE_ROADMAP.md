@@ -13,16 +13,17 @@ below reflect actual build status, not a schedule or a time budget.
 ## 🚀 Core Build Checklist
 
 ### Infrastructure Bootstrap
-- [x] Ollama + medgemma:4b (chat), qwen3.5:9b (prose extraction) → localhost:11434
+- [x] Ollama + medgemma:4b (chat) → localhost:11434
+- [x] datalab-to/lift (9.7B VLM schema-guided extraction, 4-bit NF4 & CPU fallback)
 - [x] PostgreSQL (Docker) — Chroma is the vector store, not pgvector
 - [x] Chroma vector DB (native Python, in-process)
 - [x] Neo4j (Docker/podman) — Longitudinal Health Graph
-- [x] FastAPI scaffold with async routing — all 8 routers wired to real `ml/` interfaces, not stubs (`backend/README.md`)
-- [ ] Next.js 15 setup with server components (keeps PHI server-side) — repo scaffolded (`create-next-app`), no app code written yet
-- **Deliverable**: All services running, basic API endpoints — ✅ true for `ml/` + `backend/` (live-tested end-to-end, see `docs/BACKEND_HANDOFF.md`); frontend scaffolding exists but is unmodified boilerplate
+- [x] FastAPI scaffold with async routing — all 8 routers wired to real `ml/` interfaces (`backend/README.md`)
+- [x] Next.js 16 setup with App Router & React 19 (`frontend/`)
+- **Deliverable**: All services running, basic API endpoints — ✅ true for `ml/`, `backend/`, and `frontend/`
 
 ### Document Pipeline + RAG Core
-- [x] PDF/OCR extraction (pypdf + olmOCR-v2, not Docling) → normalized observations
+- [x] Unified visual document extraction (`datalab-to/lift` 9.7B VLM) with Option A declarative RAG chunk synthesis
 - [x] Chroma ingestion pipeline (embed clinical reference docs — PubMed, MedlinePlus, USDA)
 - [x] BM25 lexical retrieval (exact term matching for lab values)
 - [x] Hand-written RAG chain with Ollama (`ml/chains/qa_chain.py`) — LangChain evaluated, not adopted
@@ -32,10 +33,10 @@ below reflect actual build status, not a schedule or a time budget.
 ### Claim Extraction + Verification
 - [x] LLM prompt for structured claim extraction (atomic facts)
 - [x] NLI-based claim verification (BART-large-MNLI, `ml/claims/verifier.py`) — not MedRAGChecker, which isn't installable
-- [x] Confidence scoring (status taxonomy: SUPPORTED, DERIVED, CONFLICTING, UNCERTAIN, UNSUPPORTED — not INFERRED, no validated signal for it yet)
+- [x] Confidence scoring (status taxonomy: SUPPORTED, DERIVED, CONFLICTING, UNCERTAIN, UNSUPPORTED)
 - [x] Entailment checking (does evidence support claim?)
-- [ ] UI: Chat interface + clickable evidence highlights
-- **Deliverable**: `/api/chat` returns claims with evidence links — ✅ done and exposed via `POST /api/chat` (`docs/API_REFERENCE.md`); not yet rendered in a UI
+- [x] UI: Chat interface + clickable evidence highlights (`frontend/app/chat/page.tsx`)
+- **Deliverable**: `/api/chat` returns claims with evidence links — ✅ done and exposed via `POST /api/chat` and rendered in Next.js UI
 
 ### Longitudinal Reasoning
 - [x] Health timeline construction (Observations grouped by date, Neo4j)

@@ -117,9 +117,13 @@ phire/
 │   │   ├── ingest/                 # Document & reference ingestion pipeline
 │   │   │   ├── ingest_patient_document.py  # Patient PDF/image ingestion coordinator
 │   │   │   ├── run_ingest.py               # Reference ingestion runner (manifest generator)
-│   │   │   ├── chunking.py, ocr.py, patient_documents.py, table_parsing.py
+│   │   │   ├── lift_extractor.py           # datalab-to/lift 9.7B VLM extractor (4-bit NF4 + CPU)
+│   │   │   ├── lift_schema.py              # Clinical document schema & payload validator
+│   │   │   ├── chunk_synthesizer.py        # Option A declarative clinical sentence synthesizer
+│   │   │   ├── patient_documents.py        # Document format router via Lift
+│   │   │   ├── chunking.py                 # Passage chunker with table parser helpers
 │   │   │   ├── pubmed.py, medlineplus.py, usda.py, topics.py
-│   │   │   ├── experiments/        # Vision OCR model selection
+│   │   │   ├── experiments/        # Vision OCR model selection benchmarks
 │   │   │   └── router_experiments/ # OCR router benchmark
 │   │   ├── reranker_experiments/   # Reranker tuning experiments & results
 │   │   └── experiments/            # Embedding benchmark & candidate evaluations
@@ -135,9 +139,8 @@ phire/
 │   │   ├── __init__.py
 │   │   ├── client.py                # Localhost-enforced Neo4j client
 │   │   ├── observations.py, medications.py, conditions.py  # Graph entity builders
-│   │   ├── document_dates.py        # Day-first clinical date parser
+│   │   ├── document_dates.py        # Day-first clinical date parser & ISO normalizer
 │   │   ├── metric_resolver.py       # Canonical metric normalization dictionary
-│   │   ├── prose_extraction.py      # Schema-constrained prose fact extraction
 │   │   ├── patient_context.py       # Graph read queries & trend delta precomputation
 │   │   ├── deletion.py              # Ingestion rollback node/edge cleanup
 │   │   └── experiments/            # Extraction model benchmark & results
@@ -157,7 +160,7 @@ phire/
 │   │   ├── __init__.py
 │   │   └── qa_chain.py             # End-to-end Reverse-RAG orchestrator
 │   │
-│   └── tests/                       # 204 pytest unit & integration tests (187 unit + 17 live)
+│   └── tests/                       # 217 pytest tests (200 unit tests + 17 live/integration tests)
 │
 ├── evaluation/                      # SHASHWATI OWNS (Planned / Scheduled)
 │   └── (ArchEHR-QA & MedHallBench benchmarks)

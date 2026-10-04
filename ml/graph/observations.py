@@ -1,8 +1,7 @@
 """
-Builds and writes typed Observation records to Neo4j — from both
-table_parsing.py's deterministic table extraction and
-prose_extraction.py's LLM-based free-text extraction, normalized to the
-same shape before writing.
+Builds and writes typed Observation records to Neo4j — primarily from
+Lift VLM structured visual extraction (build_lift_observations) and
+legacy/table extraction helpers, normalized to the same shape before writing.
 
 Schema (FHIR-inspired field names — code/value/effective/interpretation
 mirror FHIR's Observation resource; see docs/GRAPH_SCHEMA_ROADMAP.md for
@@ -17,12 +16,58 @@ no multi-patient schema to design around yet. Observation ids are stable
 via MERGE rather than duplicating them.
 """
 
+from html.parser import HTMLParser
 import re
 
 from ml.graph.client import GraphClient
 from ml.graph.document_dates import find_document_date
 from ml.graph.metric_resolver import resolve_metric
-from ml.rag.ingest.table_parsing import find_table_blocks, parse_table_rows
+
+_TABLE_RE = re.compile(r"<table>.*?</table>", re.DOTALL)
+
+
+class _TableRowParser(HTMLParser):
+    """Collects <tr> rows (each a list of cell strings) from one table block."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.row_cells: list[list[str]] = []
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag == "tr":
+            self._current_row = []
+        elif tag in ("td", "th"):
+            self._current_cell = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th") and self._current_cell is not None and self._current_row is not None:
+            self._current_row.append("".join(self._current_cell).strip())
+            self._current_cell = None
+        elif tag == "tr" and self._current_row is not None:
+            self.row_cells.append(self._current_row)
+            self._current_row = None
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+
+def find_table_blocks(text: str) -> list[str]:
+    """Return every <table>...</table> substring in text, in document order."""
+    return _TABLE_RE.findall(text)
+
+
+def parse_table_rows(table_html: str) -> list[dict[str, str]]:
+    """Parse one HTML table into a list of header-label -> cell-value dicts."""
+    parser = _TableRowParser()
+    parser.feed(table_html)
+    if not parser.row_cells:
+        return []
+    headers, *data_rows = parser.row_cells
+    return [dict(zip(headers, row)) for row in data_rows]
+
 
 DEFAULT_PATIENT_ID = "self"
 
@@ -114,7 +159,7 @@ def build_table_observations(
 def build_prose_observations(
     observations: list[dict], document_text: str, document_id: str, effective_date: str | None = None,
 ) -> list[dict]:
-    """Attach a stable id + effective date to raw observation dicts from prose_extraction.extract_facts."""
+    """Attach a stable id + effective date to raw observation dicts from free-text extraction."""
     effective = effective_date if effective_date is not None else find_document_date(document_text)
     result = []
     for obs in observations:
@@ -132,6 +177,53 @@ def build_prose_observations(
             "reference_range": None,
             "interpretation": None,
             "effective": effective,
+        })
+    return result
+
+
+def build_lift_observations(
+    observations: list[dict],
+    document_id: str,
+    effective_date: str | None = None,
+    *args,
+    **kwargs,
+) -> list[dict]:
+    """Attach stable id and normalized fields to Lift-extracted observations.
+
+    Preserves unit, reference_range, and interpretation produced by Lift.
+    Supports both (observations, document_id, effective_date) and
+    (observations, document_text, document_id, effective_date) signatures.
+    """
+    if args:
+        document_id, effective_date = effective_date, args[0]
+
+    result = []
+    for obs in observations:
+        code = obs.get("name")
+        val_str = str(obs.get("value", "")).strip()
+        if not code or not val_str:
+            continue
+        code = resolve_metric(code)
+        value, parsed_unit = _split_value(val_str)
+        unit = obs.get("unit")
+        if unit is not None:
+            unit = str(unit).strip() or None
+        else:
+            unit = parsed_unit
+
+        raw_value = val_str
+        if unit and unit not in val_str:
+            raw_value = f"{val_str} {unit}"
+
+        result.append({
+            "id": _stable_id(document_id, code),
+            "code": code,
+            "raw_value": raw_value,
+            "value": value,
+            "unit": unit,
+            "reference_range": obs.get("reference_range") or None,
+            "interpretation": obs.get("interpretation") or None,
+            "effective": effective_date,
         })
     return result
 
