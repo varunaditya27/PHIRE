@@ -1,15 +1,15 @@
 # Frontend Handoff: Architecture, Implemented UI, and Integration Guide
 
 **Audience**: Shashwati (`frontend/`, `evaluation/`) & Frontend Maintainers.  
-**As of**: 2026-09-03 (Frontend V1 Implemented on `main`).  
-**Status**: The Next.js UI is fully built with Dashboard, Chat, Document Ingestion, and Search views. This document maps the architecture, live routes, data flows, and active backlog items.
+**As of**: 2026-10-05 (reviewed end to end in real Chrome against the Docker stack).  
+**Status**: The Next.js UI is built and verified with Dashboard, Chat, Document Ingestion, and Search views, live SSE progress, a mobile layout, and a missing-document-date prompt. This document maps the architecture, live routes, data flows, and what is still open.
 
 ---
 
 ## 1. Quick Start & Local Development
 
 ### Running the Stack
-Ensure the backend services (PostgreSQL, Ollama, Neo4j, FastAPI) are running at `http://localhost:8000`:
+Easiest: `bash scripts/run.sh` starts everything in Docker, including this frontend (`http://localhost:3000`, or your `FRONTEND_PORT`; GPU or CPU variant chosen automatically — see `docs/BACKEND_HANDOFF.md` §8 and `docs/CPU_SETUP.md`). For frontend development, run the backend services (PostgreSQL, Ollama, Neo4j, FastAPI) and then the dev server:
 ```bash
 # Terminal 1: Backend
 bash scripts/run_backend.sh
@@ -21,9 +21,9 @@ npm run dev   # Runs on http://localhost:3000 (use `npx next dev -p 3001` if 300
 ```
 
 ### Environment Configuration
-- Default `NEXT_PUBLIC_API_URL` is `http://localhost:8000`.
-- Override by placing `NEXT_PUBLIC_API_URL=http://localhost:8000` in `frontend/.env.local`.
-- Backend CORS (`CORS_ORIGINS` in `backend/.env`) defaults to `["http://localhost:3000"]`.
+- Default `NEXT_PUBLIC_API_URL` is `http://localhost:8000` (an **empty** value means same-origin, for use behind the nginx proxy profile).
+- Override by placing `NEXT_PUBLIC_API_URL=...` in `frontend/.env.local`. In Docker it is a **build** argument (Next.js inlines it into the bundle), so changing it needs a rebuild.
+- Backend CORS (`CORS_ORIGINS` in `backend/.env`) defaults to `["http://localhost:3000"]`; the Docker setup derives it from `FRONTEND_PORT`.
 
 ---
 
@@ -31,9 +31,9 @@ npm run dev   # Runs on http://localhost:3000 (use `npx next dev -p 3001` if 300
 
 | Route | File Path | Description & Features |
 |---|---|---|
-| **`/` (Dashboard)** | [`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx) | **Patient Overview & Health Timeline**: Fetches `GET /api/timeline` and `GET /api/observations`. Renders one Recharts chart **per unit** (`components/timeline-chart.tsx`: mg/dL, mmHg, %, … so unlike scales never share an axis; 8-colour palette legible in light and dark; series with no numeric readings skipped; blood pressure charted as Systolic and Diastolic) and a **Latest Readings** feed (latest per metric, newest first; conditions/medications show their status; units are not repeated — `lib/readings.ts`). |
+| **`/` (Dashboard)** | [`frontend/app/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/page.tsx) | **Patient Overview & Health Timeline**: Fetches `GET /api/timeline` and `GET /api/observations`. Renders one Recharts chart **per unit** (`components/timeline-chart.tsx`: mg/dL, mmHg, %, … so unlike scales never share an axis; 8-colour palette legible in light and dark; series with no numeric readings skipped; blood pressure charted as Systolic and Diastolic) and a **Latest Readings** feed (latest per metric, newest first; conditions/medications show their status; units are not repeated — `lib/readings.ts`). A banner links to the Documents page when any document needs a date. |
 | **`/chat` (Medical Chat)** | [`frontend/app/chat/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/chat/page.tsx) | **Evidence-Attributed Assistant**: Multi-turn chat interface calling `POST /api/chat/stream` (SSE): while the backend works, a live step checklist (`components/progress-steps.tsx`) shows each stage with a per-step elapsed timer, replacing the old static spinner. Features expandable per-claim audit trails with NLI status badges (`SUPPORTED`, `DERIVED`, `CONFLICTING`, `UNSUPPORTED`), confidence percentages, and source file citations. |
-| **`/documents` (Ingestion)** | [`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx) | **Document Uploader**: Drag-and-drop file uploader (PDF, PNG, JPEG) up to 25MB calling `POST /api/documents/upload`. Live ingestion progress over SSE from `GET /api/documents/{id}/events` (stage checklist on each card: queued → loading vision model → reading document → indexing → saving to timeline → done/failed); the old 2.5s polling is gone. On stream end the page re-reads the final row via `GET /api/documents/{id}`. |
+| **`/documents` (Ingestion)** | [`frontend/app/documents/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/documents/page.tsx) | **Document Uploader**: Drag-and-drop file uploader (PDF, PNG, JPEG) up to 25MB calling `POST /api/documents/upload`. Live ingestion progress over SSE from `GET /api/documents/{id}/events` (stage checklist on each card: queued → loading vision model → reading document → indexing → saving to timeline → done/failed); the old 2.5s polling is gone. On stream end the page re-reads the final row via `GET /api/documents/{id}`. A processed document flagged `needs_date` (no date could be extracted) shows an inline date prompt (`components/date-needed-prompt.tsx`) that calls `PUT /api/documents/{id}/date`; the backend then rebuilds that document's facts and search chunks at the user's date. |
 | **`/search` (Explorer)** | [`frontend/app/search/page.tsx`](file:///home/varun/Projects/PHIRE/frontend/app/search/page.tsx) | **Evidence & Claim Explorer**: Tab 1 executes hybrid search via `GET /api/search/evidence`. Tab 2 allows direct NLI claim verification via `POST /api/evidence/verify`. |
 
 ---
@@ -69,6 +69,7 @@ The frontend communicates with the backend exclusively via typed wrappers in [`f
 - `api.documents.remove(id)`: Calls `DELETE /api/documents/{id}` (documents page trash button, confirm dialog; throws the server's `detail` on 409/404)
 - `api.documents.list()`: Calls `GET /api/documents` (documents page loads from the backend)
 - `api.chat.history()`: Calls `GET /api/chat/messages` (chat page rehydrates on mount)
+- `api.documents.setDate(id, 'YYYY-MM-DD')`: Calls `PUT /api/documents/{id}/date` (supplies a missing clinical date; returns the updated document)
 - `api.documents.get(id)`: Calls `GET /api/documents/{id}` (final status after a stream ends)
 - `api.documents.watch(id, onProgress, signal?)`: SSE stream from `GET /api/documents/{id}/events`; resolves when the server closes it
 - `api.chat.stream(message, onProgress)`: SSE from `POST /api/chat/stream`; calls `onProgress` per stage and resolves with the final `ChatResponse` (rejects on an `error` event)
@@ -91,7 +92,7 @@ SSE is read with `frontend/lib/sse.ts`'s `readSSE()` (fetch + stream reader, so 
 3. ~~**Add Chat History Rehydration**~~ — **done in `[0.7.2]`** (`api.chat.history()` on mount). Original note:
    Implement a chat message list fetch on mount in `frontend/app/chat/page.tsx` once backend exposes `GET /api/chat/messages`.
 4. ~~**Remove Redundant Ingestion Call**~~ — **done 2026-10-04.** The documents page no longer calls `api.documents.process` after upload (it would also have reset the SSE progress history mid-run); it just watches the stream.
-5. **Type Alignment**:
-   Update `Claim.source_span` to `[number, number] | null` and `ObservationRead.value` to `string | null` in `frontend/lib/api.ts`.
-6. **Observation Status Badges**:
-   Display medication and condition statuses (e.g. `"active"`, `"continued"`) as pill badges in `frontend/app/page.tsx`.
+5. ~~**Type Alignment**~~ — **done** (`Claim.source_span` is `[number, number] | null`, `ObservationRead.value`/`observed_date` are nullable, `Claim.source_filenames`, `DocumentRead.document_date`/`needs_date`).
+6. ~~**Observation Status Badges**~~ — **done**: conditions and medications show their status as the card's headline value on the dashboard.
+
+**Still open** (details in `docs/BACKLOG.md` §1): no automated frontend tests (a Playwright smoke test is the natural next step — the `[0.8.1]` review drove every page with `playwright-core` + system Chrome), chat has no "clear conversation" or timestamps, navigating away mid-chat does not abort the stream, the dashboard has no date-range filter, no accessibility pass yet, and `frontend/lib/api.ts` still has a few `any` types (existing ESLint errors).

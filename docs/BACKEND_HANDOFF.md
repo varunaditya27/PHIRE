@@ -2,7 +2,7 @@
 
 Owner: Anika — Backend Infrastructure (FastAPI, Ollama, PostgreSQL, Chroma, Docker, Neo4j).
 
-This documents the backend as it now stands: fully wired to the real `ml/` package (not a stub/fallback), tested end-to-end against real Postgres, Neo4j, and Ollama (real `medgemma:4b` + `qwen3.5:9b`), with accurate, verified results. It replaces the "Phase 2/3 fallback" scaffolding that shipped at Week 1 kickoff.
+This documents the backend as it now stands: fully wired to the real `ml/` package (not a stub/fallback), tested end-to-end against real Postgres, Neo4j, Ollama (`medgemma:4b`) and the document extractors (lift on a GPU, an Ollama vision model on CPU), and running in Docker. It replaces the "Phase 2/3 fallback" scaffolding that shipped at Week 1 kickoff. Sections 1–7 record how the integration was built and the original 2026-08-28 verification; §8 is the current run guide (including Docker and the CPU variant) and §9 the GPU-mode/SSE design.
 
 ## 1. What changed and why
 
@@ -26,8 +26,9 @@ FastAPI Backend (backend/app/)
 ml/  (Varun's scope — QAChain, HybridRetriever, LiftExtractor,
       ClaimVerifier, GraphClient — all real, all wired)
     │
-    ├──→ Ollama (localhost:11434) — medgemma:4b (chat)
-    ├──→ Lift VLM (in-process / vLLM) — datalab-to/lift (single-pass visual extraction)
+    ├──→ Ollama (localhost:11434) — medgemma:4b (chat; also document extraction on CPU)
+    ├──→ Document extractor, chosen by PHIRE_EXTRACTOR: datalab-to/lift in-process on a CUDA GPU,
+    │    or the Ollama vision model (ml/rag/ingest/ollama_extractor.py) on a CPU-only machine
     ├──→ Chroma (in-process, shared REPO_ROOT/data/chroma, collection
     │    "phire_evidence") — one physical store, one schema, owned by
     │    ml/rag/retriever.py
@@ -35,21 +36,21 @@ ml/  (Varun's scope — QAChain, HybridRetriever, LiftExtractor,
          (Patient/Observation/Medication/Condition), owned by ml/graph/
 
 PostgreSQL (backend-owned, relational bookkeeping only):
-    documents (upload metadata), chat_messages, claims (schema exists,
-    currently unwritten — see §6), audit_log
+    documents (upload metadata + the saved structured extraction and the clinical date applied),
+    chat_messages, claims (one row per claim, with source_filenames), audit_log
 ```
 
-Postgres and Neo4j are **not duplicate stores of the same data**. Postgres never holds patient facts (labs/meds/conditions) — those live only in Neo4j, populated by `ml/graph`. Postgres holds upload bookkeeping and conversation history only.
+Postgres and Neo4j are **not duplicate stores of the same data**. Postgres never holds patient facts (labs/meds/conditions) — those live only in Neo4j, populated by `ml/graph`. Postgres holds upload bookkeeping (including each document's saved extraction, so a missing date can be fixed without re-running extraction) and conversation history only.
 
 ## 3. How each route is wired
 
 | Route | Backed by | Notes |
 |---|---|---|
-| `POST /api/chat` | `ml.chains.qa_chain.QAChain` (singleton) | Full retrieve→rerank→generate→extract→verify→abstain pipeline. Returns `{answer, claims, id, created_at}`. Every claim carries `status`, `confidence`, and a citation (`source_url` / `source_filename` + `source_span`, or neither if the evidence was a graph fact). |
+| `POST /api/chat`, `POST /api/chat/stream`, `GET /api/chat/messages` | `ml.chains.qa_chain.QAChain` (singleton) | Graph retrieval + retrieve→rerank→generate→extract→verify→abstain pipeline. Returns `{answer, claims, citations, id, created_at}`. Every claim carries `status`, `confidence`, `source_filenames` (all documents it rests on) and/or `source_url`, plus `source_span` for single-document claims. `/stream` is the same turn as SSE; `/messages` is the persisted history. |
 | `GET /api/search/evidence`, `POST /api/evidence/retrieve` | `ml.rag.retriever.HybridRetriever` (singleton) | Real BM25 + semantic hybrid search via reciprocal rank fusion. |
 | `POST /api/evidence/verify` | `HybridRetriever` + `ml.claims.verifier.ClaimVerifier` (singletons) | Re-retrieves using the claim text as the query (the request contract only carries the claim, not evidence), then runs real NLI verification. |
 | `POST /api/claims/extract` | `ml.claims.extractor.ClaimExtractor` (singleton) | Returns unverified claim strings (status always `UNCERTAIN` — extraction alone doesn't verify). |
-| `POST /api/documents/upload`, `/{id}/process`, `GET /{id}` | `app/services/document_processor.py` → `ml.rag.ingest` + `ml.graph` | Runs in a `BackgroundTask`. Extracts text, chunks + indexes into the shared retriever, extracts table + prose facts, writes them to Neo4j. Upload metadata/status lives in Postgres `documents`. |
+| `POST /api/documents/upload`, `/{id}/process`, `GET /api/documents`, `GET`/`DELETE /{id}`, `PUT /{id}/date`, `GET /{id}/events` (SSE) | `app/services/document_processor.py` → `ml.rag.ingest` + `ml.graph` | Ingestion runs in a `BackgroundTask`: the extractor (lift or Ollama vision) reads the document into the clinical schema, the extraction is saved, chunks are indexed into the shared retriever, and facts are written to Neo4j. If no date is found the document is flagged `needs_date` (provisional date in use) and `PUT /{id}/date` rebuilds it from the saved extraction. Upload metadata/status lives in Postgres `documents`. |
 | `GET /api/observations`, `GET /api/timeline` | `app/services/graph_reader.py` → `ml.graph.client.GraphClient` (raw Cypher) | Reads Observation/Medication/Condition nodes directly from Neo4j — **not** `ml.graph.patient_context` (that module returns pre-formatted prose sentences for the chat prompt, not structured fields; this reads the same schema via `GraphClient.run()`, `ml/`'s public Cypher API). |
 | `POST /api/health` | Postgres, Ollama `/api/tags`, `HybridRetriever` construction, `GraphClient` connectivity | All four now checked; `graph` is a new field on `HealthStatus`. |
 | `GET /api/recommendations/*` | `ml.recommendations.*` | Correctly 501 — those modules are docstring-only stubs in `ml/`, not a backend gap. |
@@ -70,7 +71,7 @@ All `ml/` instances are built **once**, lazily, and cached (`app/services/ml_sin
 - **`EvidenceCitation.evidence_passage_id`/`document_id` typed as `UUID`** — real `ml/` `Chunk.id` values are source-derived strings (`patient_doc_<hash>_0`), not UUIDs. Changed to `str`.
 - **`chroma_persist_dir` default was cwd-relative** (`"./data/chroma"`) — silently diverges from `ml/rag/retriever.py`'s own repo-root-relative default depending on which directory either process is launched from. Fixed to resolve from the repo root, matching `ml/`'s own convention exactly (verified live: this is the fix that made backend and `ml/` share one physical Chroma store instead of two).
 - **`ml/` wasn't importable from a local (non-Docker) backend process** — `ml/` lives at the repo root, not under `backend/`; Docker's bind mount (`../ml:/app/ml`, `WORKDIR /app`) puts it on the path automatically, but `scripts/run_backend.sh` (which `cd`s into `backend/`) didn't. Fixed by exporting `PYTHONPATH` to the repo root in that script. **Verified live**: every `ml/`-backed route silently 500'd with `ModuleNotFoundError` before this fix.
-- **Docker image never installed `ml/`'s dependencies** (torch, transformers, neo4j driver, etc.) — the build context was `backend/` only. Changed both compose files' backend build context to the repo root and `docker/Dockerfile.backend` to install both `backend/requirements.txt` and `ml/requirements.txt`. `ml/`'s *source* still isn't baked into the image — it's still bind-mounted read-only at runtime, so editing `ml/` locally doesn't require an image rebuild.
+- **Docker image never installed `ml/`'s dependencies** (torch, transformers, neo4j driver, etc.) — the build context was `backend/` only. Changed both compose files' backend build context to the repo root and `docker/Dockerfile.backend` to install both `backend/requirements.txt` and `ml/requirements.txt`. (Later superseded: `ml/` is now baked into the image, see §8 — on SELinux hosts the bind mount was unreadable.)
 - **Ollama/Neo4j unreachable from inside a bridge-network Docker container** — `ml.llm.ollama_client.OllamaClient` and `ml.graph.client.GraphClient` both call `ml.local_only.require_localhost()`, which only accepts a URI whose hostname is *literally* `localhost`/`127.0.0.1`/`::1` — a bridge-network service name like `ollama` or `neo4j` fails that check (correctly — it's closing a real privacy-boundary bug, not an arbitrary restriction). Fixed by setting the `backend` service to `network_mode: host` in both `docker-compose.yml`s, so every other service's *published* port is reachable at `localhost` from inside the backend container, without touching `ml/`'s code. **Caveat**: host networking is Linux-native; Docker Desktop (Mac/Windows) only has a beta opt-in for it (4.29+). See §8.
 
 ## 6. Known gaps / honest limitations
@@ -81,7 +82,7 @@ All `ml/` instances are built **once**, lazily, and cached (`app/services/ml_sin
 - **`LIFT_MODEL`, `LIFT_DEVICE`, and `PHIRE_MOCK_LIFT` configuration**:
   Backend `Settings` now exposes `lift_model`, `lift_device` (`"auto"`, `"cuda"`, `"cpu"`), and `phire_mock_lift` (for offline fast tests), plumbed into `ml_singletons.get_lift_extractor()`.
 - ~~**`ClaimVerifier.verify()` ran one NLI forward pass per evidence chunk**~~ — batched in `[0.7.4]` (token-budget batching; see `CHANGELOG.md`). Measured gain is modest: ~1.0× on a typical turn, ~2–3× on a worst-case pool, because time is dominated by the long 512-token passages, which are compute-bound.
-- **`ml/graph/document_dates.py` falls back to today's date when no clinical date can be extracted from a document** — a deliberate, documented tradeoff ("undated is worse than mis-dated for a time-series graph"), reaffirmed during the review pass rather than reversed. Can make an old, undated document look like the most recent reading in trend calculations; if this bites in practice, revisit by deciding what "unknown date" should mean downstream (skip the observation? exclude from trends only?) rather than just removing the fallback.
+- ~~**Undated documents silently used today's date**~~ — resolved (`[0.9.0]`): the backend no longer relies on `find_document_date`'s today-fallback for uploads. A document with no extractable date is stored with a provisional date and `needs_date: true`, the UI asks the user, and `PUT /api/documents/{id}/date` rebuilds its facts and chunks. The fallback remains only in tools where nobody can be asked (the standalone ingestion CLI). Documents ingested before extractions were saved cannot be re-dated (delete and re-upload).
 - **`ObservationType.SYMPTOM`/`VITAL`** have no dedicated node label in `ml/graph`'s schema (everything numeric is `:Observation`) — filtering to either returns an empty list, not an error.
 
 Frontend work starts from `docs/FRONTEND_HANDOFF.md` and `docs/API_REFERENCE.md`, generated from this handoff's state — see those instead of treating "no frontend yet" as still true.
@@ -89,6 +90,8 @@ Frontend work starts from `docs/FRONTEND_HANDOFF.md` and `docs/API_REFERENCE.md`
 Resolved in the review pass after this handoff (see `CHANGELOG.md`'s `[0.4.0]`): the `claims` table now gets real rows from `router_chat.py`; a `GPU_LOCK` in `ml_singletons.py` serialized chat generation against document ingestion (superseded by the GPU modes in §9); the `nginx` proxy profile now runs host-networked like `backend` so it can actually reach it.
 
 ## 7. Testing performed
+
+> **Historical record.** This section documents the 2026-08-28 verification pass as it happened — it mentions the since-retired `qwen3.5:9b` prose extraction, a pgvector Postgres image, and "8 routers" (there are now 9, including the document-events router). The current state is in §8 and §9, `CHANGELOG.md` and `docs/BACKLOG.md`.
 
 All of the following were run against **real** infrastructure — a fresh Postgres 16 + pgvector container, a fresh Neo4j 5 container, and PHIRE's own Ollama instance with the real `medgemma:4b` and `qwen3.5:9b` models pulled (not mocks, not the fallback stub path):
 
@@ -140,29 +143,32 @@ All test infrastructure (containers, volumes, temp files) was torn down afterwar
 **Local (no Docker) — recommended for development:**
 ```bash
 scripts/setup.sh          # venv + backend/requirements.txt + ml/requirements.txt + npm install
+                          # (+ ml/requirements-lift.txt on a GPU machine; CPU-only machines get CPU PyTorch, no lift)
 # fill in backend/.env: DATABASE_URL, OLLAMA_HOST/MODEL, NEO4J_URI/USER/PASSWORD, CHROMA_PERSIST_DIR
 # have Postgres, Neo4j, and Ollama reachable at those addresses (docker run, or scripts/run.sh's individual services)
-ollama pull medgemma:4b       # the only Ollama model the app uses (extraction is lift, in-process)
+ollama pull medgemma:4b       # the only Ollama model the app uses (also the CPU-variant document reader)
 scripts/run_backend.sh     # alembic upgrade head + uvicorn --reload, PYTHONPATH set to repo root
 ```
 
 **Docker (full stack):**
 ```bash
-scripts/run.sh              # creates .env / backend/.env if missing, detects an NVIDIA runtime (adds
-                            # docker/docker-compose.gpu.yml), builds, starts, waits until the backend is healthy
+scripts/run.sh              # creates .env / backend/.env if missing; GPU variant if an NVIDIA runtime is present
+                            # (adds docker/docker-compose.gpu.yml), otherwise the CPU variant (docker-compose.cpu.yml);
+                            # force with PHIRE_VARIANT=gpu|cpu. Builds, starts, waits until the backend is healthy
 scripts/run.sh down         # stop (data volumes and the repo's data/ are kept)
 
-# one-time: seed the public reference corpus (MedlinePlus/PubMed/USDA; needs network)
+# one-time: seed the public reference corpus (MedlinePlus/PubMed/USDA; needs network) -- use the same overrides
+# as the variant you started (gpu.yml shown; cpu.yml on a CPU-only machine)
 docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml --profile ingest run --rm ingest
 ```
 What `docker/docker-compose.yml` starts: `postgres`, `neo4j`, `backend` (single uvicorn worker, runs `alembic upgrade head` on every start via `docker/backend-entrypoint.sh`, healthcheck on `/api/ping`) and `frontend`. **Ollama is the one already running on the host** (`OLLAMA_HOST`, default `http://localhost:11434`; `medgemma:4b` is the only Ollama model the app uses) — no second copy of the model. Only when the host has none does `scripts/run.sh` enable the bundled container (`--profile ollama`: `ollama` + a one-shot `ollama-pull` that fetches `OLLAMA_MODEL` if missing). The `nginx` reverse proxy (`proxy`) and the reference-corpus `ingest` job are opt-in profiles.
 
 - **Always pass `--env-file .env`.** Compose reads `.env` from the compose file's own directory (`docker/`), not the repo root, so a plain `docker compose -f docker/docker-compose.yml up` silently ignored every setting in the root `.env` (ports, passwords, model). `scripts/run.sh` does this for you.
-- **GPU** is in a separate override (`docker/docker-compose.gpu.yml`) so the base file also starts on hosts without an NVIDIA runtime. It needs the NVIDIA Container Toolkit (Fedora: `sudo dnf install nvidia-container-toolkit`, `sudo nvidia-ctk runtime configure --runtime=docker`, restart Docker). Without a GPU, chat runs on CPU (slow) and document extraction with lift is not practical.
+- **GPU and CPU variants.** `docker/docker-compose.gpu.yml` gives the backend (and any bundled Ollama) the NVIDIA GPU; `docker/docker-compose.cpu.yml` instead builds the image with `VARIANT=cpu` (CPU-only PyTorch, no lift: **2.7GB vs 11.1GB**) and sets `PHIRE_EXTRACTOR=ollama` and a 600s Ollama timeout, so documents are read by an Ollama vision model. Setup, measured timings and limits: [CPU_SETUP.md](CPU_SETUP.md). The base file works with either override, and also without a GPU on a host with no NVIDIA runtime. The GPU variant needs the NVIDIA Container Toolkit (Fedora: `sudo dnf install nvidia-container-toolkit`, `sudo nvidia-ctk runtime configure --runtime=docker`, restart Docker). Without a GPU, chat runs on CPU (slow) and document extraction with lift is not practical.
 - **Privacy / network exposure.** PHIRE has no authentication, so every published port is bound to `127.0.0.1` and the backend listens on loopback (`BACKEND_HOST`). Reaching it from other machines is an explicit opt-in: the `proxy` profile (nginx, 25MB uploads, SSE-safe settings) plus `BACKEND_HOST=0.0.0.0`, on a network you trust. For same-origin calls through the proxy, build the frontend with `NEXT_PUBLIC_API_URL=` (empty).
 - **`NEXT_PUBLIC_API_URL` is a build argument** (Next.js inlines it into the bundle at `next build`); changing it needs `--build`. `CORS_ORIGINS` is derived from `FRONTEND_PORT`.
 - **Data.** `PHIRE_DATA_DIR` (default the repo's `data/`) is bind-mounted at `/app/data`: uploads, Chroma (including the reference corpus), the audit log and the ingest manifest, shared with a local run. `HF_CACHE_DIR` (default a named volume) holds Hugging Face weights — lift alone is 18GB, so point it at an existing `~/.cache/huggingface` to avoid re-downloading; `OLLAMA_MODELS_DIR` likewise. The backend container runs as non-root `PHIRE_UID:PHIRE_GID` (default 1000) so files in `data/` stay yours.
-- **Python 3.12** in the backend image: `lift-pdf` requires >= 3.12 (the previous 3.11 image could not install it at all).
+- **Python 3.12** in the backend image: `lift-pdf` requires >= 3.12 (the previous 3.11 image could not install it at all). Requirements are split: `ml/requirements.txt` (CPU-safe base) and `ml/requirements-lift.txt` (GPU extra); `ml/requirements-experiments.txt` (sentence-transformers, pypdf, rapidocr — only for re-running benchmarks) is kept out of both images.
 - **`ml/` is baked into the image** (copied after the dependency layer, so editing it rebuilds only tiny layers). It used to be bind-mounted from the checkout, but on SELinux hosts (Fedora/RHEL) the container could not read that mount at all ("Permission denied"). The remaining bind mounts (data dir, optional host HF cache) carry `:z` for the same reason.
 - **Cold-start concurrency is handled.** `preload_ml_modules()` imports `ml/`'s heavy modules once at startup (a lifespan hook), and the failure rollback takes the GPU lock before touching the retriever. Before this, uploading a document and chatting within the first minute of a cold container failed (`cannot import name 'AutoModel' from 'transformers'` and Chroma `KeyError`) — reproduced in Docker, fixed, and re-verified.
 - **nginx** (`proxy` profile) is a template (`docker/nginx.conf.template`): it follows `BACKEND_PORT` / `FRONTEND_PORT` and listens on `PROXY_PORT` (default 8080). It allows 25MB uploads (nginx's 1MB default returned 413 for every real PDF) and passes SSE through unbuffered.
@@ -189,7 +195,7 @@ On the 8GB dev GPU, quantized lift (~6.5GiB peak) cannot coexist with the chat-t
 
 `gpu_mode(mode, on_progress=None)` is a context manager that **replaces the bare `GPU_LOCK`** at every call site (`router_chat`, `router_claims`, `router_evidence` ×2, `router_search`, `document_processor`). It takes the process-wide lock, and — only if the mode *changed* — evicts the other group: entering `LIFT` unloads Ollama's model (`keep_alive: 0` via its API) and moves the in-process chat models to CPU RAM (`move_to("cpu")`, ~1s to bring back); entering `CHAT` releases lift and moves them back to CUDA. Requesting the mode that is already active is a no-op, so consecutive chats never swap (warm chat ≈ 5.6s; the first chat after an upload ≈ 15s for the reload). Singletons not yet built are never constructed just to be moved.
 
-`document_processor.process_document` therefore runs extraction under `gpu_mode(LIFT)` and embedding/indexing under `gpu_mode(CHAT)`. `LiftExtractor` additionally frees its own weights after every document (`_release_model`).
+`document_processor.process_document` therefore runs extraction under `gpu_mode(extractor.gpu_mode)` — `LIFT` for lift, `CHAT` for the Ollama vision extractor (its model lives in Ollama, so the chat group stays resident) — and embedding/indexing under `gpu_mode(CHAT)`. On a CPU-only machine there is no GPU to arbitrate: the lock still serializes requests, nothing is moved, and the "onto the GPU" progress message is not sent. `LiftExtractor` additionally frees its own weights after every document (`_release_model`).
 
 ### 9.2 SSE endpoints and the progress channel
 

@@ -80,7 +80,7 @@ GET  /api/recommendations/nutrition # nutrition recommendations
 - **PostgreSQL**: Schema, migrations, encryption, audit logging (relational only — Chroma is the vector store, not pgvector)
 - **Chroma Vector DB**: Embedding pipeline, retrieval indexes (in-process, `ml/rag/retriever.py` owns the client)
 - **Docker & Deployment**: Containerization, docker-compose, CI/CD
-- **Document Processing**: implemented in `ml/rag/ingest/` (unified visual extraction via `datalab-to/lift` 9.7B VLM with Option A RAG chunk synthesis) — wired in `backend/app/services/document_processor.py` under `GPU_LOCK`
+- **Document Processing**: implemented in `ml/rag/ingest/` (unified visual extraction via `datalab-to/lift` 9.7B VLM with Option A RAG chunk synthesis) (or an Ollama vision model on CPU-only machines) — wired in `backend/app/services/document_processor.py` under `gpu_mode(...)`
 - **HIPAA Compliance**: Audit trails, data retention, security
 - **DevOps**: Scripts, deployment automation, health checks
 
@@ -93,7 +93,7 @@ GET  /api/recommendations/nutrition # nutrition recommendations
    - Latency monitoring (<3 sec)
 
 2. **Data Layer**
-   - PostgreSQL schema (patients, observations, documents, claims, evidence)
+   - PostgreSQL schema (documents incl. saved extractions, chat_messages, claims, audit_log — patient facts live in Neo4j, passages in Chroma)
    - Vector store indexing (Chroma)
    - Backup/recovery
    - Query optimization
@@ -104,11 +104,11 @@ GET  /api/recommendations/nutrition # nutrition recommendations
    - Reranking pipeline
    - Evidence embedding & storage
 
-4. **Document Processing** (unified extraction implemented in `ml/rag/ingest/` via `datalab-to/lift` VLM)
-   - Unified visual document extraction (`datalab-to/lift`, `ml/rag/ingest/lift_extractor.py`) across digital PDFs, scanned PDFs, and images
+4. **Document Processing** (unified extraction implemented in `ml/rag/ingest/`: `datalab-to/lift` on GPU machines, an Ollama vision model on CPU-only machines)
+   - Unified visual document extraction (`ml/rag/ingest/lift_extractor.py`, or `ollama_extractor.py` on CPU) across digital PDFs, scanned PDFs, and images
    - Schema-guided clinical extraction (`ml/rag/ingest/lift_schema.py`)
    - Option A declarative RAG chunk synthesis (`ml/rag/ingest/chunk_synthesizer.py`)
-   - Transactional rollback and GPU serialization (`backend/app/services/document_processor.py`)
+   - Transactional rollback, LIFT/CHAT GPU modes, and the missing-date flow (`backend/app/services/document_processor.py`, `gpu_modes.py`)
 
 5. **Security & Privacy**
    - TLS/SSL configuration
@@ -138,7 +138,7 @@ GET  /api/search/evidence            # Full-text + semantic search
 **Primary Domain**: User-facing experience + proof that PHIRE works
 
 **Tech Stack Ownership**:
-- **Next.js 15**: Frontend framework, server components, routing
+- **Next.js 16**: Frontend framework, server components, routing
 - **React**: Components, hooks, state management
 - **TypeScript**: Type safety, props validation
 - **Tailwind CSS**: Styling, responsive design, individual-user UX (PHIRE is single-user/self-service, not clinician-facing)
@@ -270,18 +270,18 @@ evaluation/
 - [x] Design claim verification approach — NLI-based (BART-large-MNLI), not MedRAGChecker (not installable, see `docs/OPEN_SOURCE_TOOLS.md`)
 - [x] Real RAG chain implemented (`ml/chains/qa_chain.py`) — superseded the original mock-chain plan
 
-**Anika** - Backend Infrastructure:
-- [ ] Ollama + medgemma:4b running locally
-- [ ] PostgreSQL Docker setup (Chroma is the vector store, not pgvector — see `ml/rag/retriever.py`)
-- [ ] FastAPI project scaffold (routes, logging)
-- [ ] Basic API endpoints (health check, upload stub)
-- [ ] Docker-compose file for all services
-- [ ] Database schema + migrations
+**Anika** - Backend Infrastructure: — done (Ollama is the host's; the compose file's bundled Ollama is opt-in)
+- [x] Ollama + medgemma:4b running locally
+- [x] PostgreSQL Docker setup (plain `postgres:16`; Chroma is the vector store, not pgvector — see `ml/rag/retriever.py`)
+- [x] FastAPI project scaffold (routes, logging)
+- [x] Basic API endpoints (health check, upload)
+- [x] Docker-compose file for all services (+ GPU / CPU overrides, ingest and proxy profiles)
+- [x] Database schema + migrations (Alembic, applied automatically at container start)
 
 **Shashwati** - Frontend & Evaluation:
-- [ ] Next.js 15 project setup (app router, TypeScript)
-- [ ] Chat component scaffold (input + response display)
-- [ ] Tailwind CSS + responsive layout
+- [x] Next.js project setup (v16, app router, TypeScript)
+- [x] Chat component (input + streamed progress + claim audit display)
+- [x] Tailwind CSS + responsive layout (mobile top-bar layout verified at 390px)
 - [ ] Create 10 evaluation questions with expert answers
 - [ ] Download ArchEHR-QA 2026 dataset
 - [ ] Design evaluation metrics (precision, recall, F1)
@@ -295,42 +295,42 @@ evaluation/
 - [ ] Implement fitness recommendation engine — not started (`ml/recommendations/` is still stubs)
 - [x] Format responses for frontend (JSON claims + evidence) — `ChatResponse`/`VerifiedClaim` dataclasses, JSON-serializable
 
-**Anika** - Backend Infrastructure:
-- [ ] Implement `/api/documents/upload` endpoint
-- [ ] Implement document processing pipeline
-- [ ] Create `/api/patient/{id}/observations` endpoint
-- [ ] Implement health timeline construction
-- [ ] Add HIPAA audit logging
+**Anika** - Backend Infrastructure: — done
+- [x] Implement `/api/documents/upload` endpoint (+ list, delete, SSE events, missing-date endpoint)
+- [x] Implement document processing pipeline (`app/services/document_processor.py`)
+- [x] `GET /api/observations` / `GET /api/timeline` (single-patient; no `patient_id` in the API)
+- [x] Implement health timeline construction (graph-backed, `app/services/graph_reader.py`)
+- [x] Add HIPAA audit logging
 
 **Shashwati** - Frontend & Evaluation:
-- [ ] Connect Next.js frontend to Anika's FastAPI backend
-- [ ] Implement ChatInterface component (consume `/api/chat`)
-- [ ] Implement EvidenceDisplay component (show sources)
-- [ ] Implement Timeline visualization component
+- [x] Connect Next.js frontend to Anika's FastAPI backend (`frontend/lib/api.ts`)
+- [x] Implement the chat interface (consumes `POST /api/chat/stream`)
+- [x] Implement evidence display (claim audit with every source file / URL)
+- [x] Implement timeline visualization (one chart per unit)
 - [ ] Setup evaluation metrics (Python functions)
 - [ ] Create ArchEHR-QA benchmark runner
 
 ### WEEK 3: Polish & Evaluation (Final Integration)
 
 **Varun** - ML & Intelligence:
-- [ ] Fine-tune prompts based on real chat traffic (blocked on backend integration)
+- [ ] Fine-tune prompts based on real chat traffic (backend integration is done; needs real usage data)
 - [x] Improve evidence ranking — reranker weight-tuning benchmark + patient-document floor fix (`ml/rag/reranker_experiments/RESULTS.md`)
 - [ ] Optimize recommendation quality — not started (`ml/recommendations/` is still stubs)
 - [x] End-to-end testing (full workflows) — live pipeline tests against real Ollama/Neo4j/Chroma (`ml/tests/test_qa_chain_live_e2e.py`)
 - [x] Handle edge cases (empty results, conflicting evidence, abstention)
 
 **Anika** - Backend Infrastructure:
-- [ ] Performance optimization (caching, query tuning)
-- [ ] Production-grade error handling
-- [ ] Deploy docker-compose setup
-- [ ] Privacy audit (no cloud egress verification)
-- [ ] Health checks & monitoring
+- [ ] Performance optimization (caching, query tuning) — partly: batched fp16 claim verification and LIFT/CHAT GPU modes are done; response caching is not
+- [x] Production-grade error handling (rollbacks on failed ingestion, graceful degradation when Neo4j is down)
+- [x] Deploy docker-compose setup (GPU and CPU variants, verified end to end)
+- [ ] Privacy audit (no cloud egress verification) — localhost enforcement is in code and ports are loopback-only; a formal egress audit is not done
+- [x] Health checks (`POST /api/health`, container healthchecks); monitoring beyond that is not set up
 
 **Shashwati** - Frontend & Evaluation:
-- [ ] Polish frontend UI (styling, animations, individual-user UX)
-- [ ] Frontend error handling (network errors, fallbacks)
-- [ ] Accessibility (keyboard nav, WCAG AA compliance)
-- [ ] Mobile responsiveness (tablets, different screens)
+- [x] Polish frontend UI (design tokens, dark mode, per-unit charts)
+- [x] Frontend error handling (error states for failed calls, stream errors)
+- [ ] Accessibility (keyboard nav, WCAG AA compliance) — not done
+- [x] Mobile responsiveness (top-bar layout, no overflow at 390px)
 - [ ] Run full evaluation on demo scenarios (3 personas)
 - [ ] Compute ablation studies (RAG vs baseline)
 - [ ] Statistical significance testing

@@ -267,3 +267,38 @@ Measured VRAM: lift extracting ≈ 6.5GiB peak; chat group (MedCPT query+article
 ### 4. UX finding: silent waits
 
 Ingestion (~70–90s) and cold chat (up to ~35s) had no feedback beyond a spinner/polling. Stage-level SSE (document stages; chat pipeline stages with per-claim "verifying i of n") was added. Token streaming was deliberately not added: the displayed answer is assembled only from verified claims, so draft tokens would show text that may be dropped.
+
+---
+
+## 2026-10-05: Graph retrieval, USDA evidence as sentences, fp16 verification, CPU-only extraction
+
+Single-run measurements on one machine (RTX 5050 Laptop 8GB, Ryzen 7 260, real models); indicative, not benchmarks.
+
+### 1. Graph retrieval (the missing third leg) — deterministic traversal, verified on real data
+
+Built `ml/graph/graph_retrieval.py` (+ `relations.py`, `conflicts.py`): entity linking of the question against metrics/medications/conditions, one hop through a curated drug/condition → metric table, full histories with an overall-change summary, and conflicting-record detection (same fact, same date, different documents; a later value is a trend). Live check on a graph with two reports and two medications: "How is my statin working?" linked Atorvastatin → the four lipid metrics (HbA1c was **not** pulled in) and produced `DERIVED` trend claims citing both source documents; "Has my LDL changed relative to my medication?" (generic "my medication" links *all* medications, hence HbA1c via metformin) answered with both dated values and the dose; a conflict question on data with no conflicts originally produced an unrelated list of facts, which is why the context now states "No conflicting records were found…" explicitly. LightRAG was not used: the relationships needed are already structured, so traversal is exact and every sentence is traceable to stored rows. Limits: the link table is hand-curated; no single traversal from the patient graph into a Chroma guideline passage; medications carry the document date, not a start date.
+
+### 2. USDA evidence as sentences — and a false positive the old format hid
+
+The terse form `"Fish, salmon … — per 100g: Protein 24.6 g, …"` was replaced by natural-language sentences, including FDA "high" (≥ 20% daily value) / "good source" (10–19%) / low-sodium statements, and the 101 stored chunks (plus 176 MedlinePlus chunks whose sentences were glued together by stripped HTML — 169 of 176 affected) were upgraded in place, offline, by parsing the stored text. Rendering variants were scored offline on 9 hand-labelled nutrition claims against the real BART-MNLI verifier:
+
+| Rendering | Correct | Notable |
+|---|---|---|
+| A: sentences, abbreviated units (`19.8 g`) | 7/9 | "about 20 grams of protein" only 0.65 entailment (g vs grams) |
+| **B: sentences, spelled-out units, one sentence** | **8/9** | "20 grams" 0.93, "142 calories" 0.96; the one miss was "bananas are a good source of potassium" (7.6% DV — borderline by the FDA rule) |
+| C: one sentence per nutrient | 8/9 | slightly weaker on amount claims |
+| D: split into short chunks | 9/9 | best, but multiplies chunks per food for little gain |
+
+B was adopted. On the real corpus: "Oranges are high in vitamin C" 0.81 → 1.00; the false claim "Apples are high in protein" went from `UNCERTAIN` to a correct `CONFLICTING` (0.99); "Salmon is high in protein" 0.86 → 0.97. **"Salmon contains about 20 grams of protein per 100 grams" went from `SUPPORTED` 0.99 to `UNCERTAIN` — a correction, not a regression:** the corpus holds only two salmon entries, both cooked (24.6 and 25.8 g), so the old terse text let NLI accept 24.6 as "about 20" (a false positive) and the sentence form no longer does. Lesson: a terse key-value premise makes NLI over-accept numeric near-matches as well as under-accept qualitative claims.
+
+### 3. Claim verification speed and precision
+
+Batching by token budget (sorted by length so short facts are not padded to a 512-token passage): identical probabilities (max difference 5e-6), ~1.0× on a typical turn and ~2–3× on a worst-case pool — the long passages are compute-bound, a first fixed-size-batch version was *slower* on small pools. fp16 on CUDA: accuracy on the 129 hand-labelled pairs identical (0.969), 0 label and 0 threshold flips, max probability difference 0.0024, steady-state typical turn 1.27s → 0.40s; only cost a ~2s kernel warmup on first use.
+
+### 4. CPU-only document extraction (Ollama vision model) and CPU chat latency
+
+`OllamaVisionExtractor` (page image + PDF text layer → schema-constrained JSON from `medgemma:4b`) on three documents with known ground truth (a digital PDF, a degraded rotated scan, a form with composite readings). Same accuracy on GPU and CPU (6/6, 6/6, 5/5 observations, all dates right); the scan missed one medication and one diagnosis on both. Time per one-page document: GPU Ollama 10–34s; CPU-only (`num_gpu=0`) **109–135s**. CPU chat turn components (CPU container for retrieval/rerank/NLI, Ollama CPU for generation): retrieval+rerank ~4s, draft ~23s (1,403-token prompt: 113 tok/s prompt, 6.5 tok/s generation), claim extraction ~10s, verification ~6–7s per claim → **~40–70s per turn**. The CPU backend image is 2.67GB versus 11.1GB (CPU-only PyTorch, no lift). The container's Ollama timeout was a hard-coded 120s and the `OLLAMA_TIMEOUT_SECONDS` setting was never passed to the client — both fixed because they would have broken CPU generation.
+
+### 5. A refactor that silently dropped a route
+
+Splitting the SSE endpoint into its own router file deleted `DELETE /api/documents/{id}` (it sat after the code that was cut); nothing failed until a cleanup call returned 405. The fix added HTTP-level tests for delete and a test asserting that every route the frontend calls is registered. Lesson: refactors of route files need a registration test, not just a "does it import" check.

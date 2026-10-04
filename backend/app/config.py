@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     # ml/llm/ollama_client.py) -- medgemma ships 4B/27B, not 8B.
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "medgemma:4b"
-    ollama_timeout_seconds: float = 30.0
+    # Per generation call. Was 30 and unused until the client honored it; 120 is what the client always used,
+    # and CPU-only machines need far more (docker-compose.cpu.yml sets 600).
+    ollama_timeout_seconds: float = 120.0
 
     # --- Legacy model config (deprecated; superseded by Lift VLM) ---
     ocr_model: str = "olmocr"

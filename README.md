@@ -17,14 +17,13 @@ PHIRE helps users understand their personal health data through an AI assistant 
 ### Core Features (MVP)
 - **Local LLM Chat**: Ask health questions without sending data to the cloud
 - **Evidence Attribution**: Every answer traces atomic claims to verified records
-- **Longitudinal Analysis**: Understands your health trends over time via graph modeling
+- **Longitudinal Analysis**: Understands your health trends over time via graph modeling, follows links between medications, conditions and lab trends, and flags records that disagree
 - **Hallucination Detection**: Refuses to guess when evidence is insufficient
 - **Document Processing**: Ingests lab reports, health records, and PDFs automatically
 
 ### Extended Features (Post-MVP)
 - Fitness & nutrition recommendations with ML models
 - Wearable data integration (Fitbit, Oura, Apple Watch)
-- Multi-hop graph retrieval and contradiction detection
 - Doctor-preparation summaries for clinical appointments
 - FHIR-compliant health representations
 
@@ -35,20 +34,24 @@ PHIRE helps users understand their personal health data through an AI assistant 
 ```
 Frontend (Next.js 16 + React 19)
     ↓
-FastAPI Backend (Python 3.11+)
+FastAPI Backend (Python 3.12)
     ↓ ↙ ↘
 Ollama               RAG System                      Neo4j Graph
-(medgemma:4b)        (datalab-to/lift VLM +          (Longitudinal Health Graph:
-                      MedCPT embeddings +             Observations, Timeline,
-                      BM25 + Chroma +                 Medications, Conditions)
-                      BART-large-MNLI)
+(medgemma:4b)        (lift VLM on GPU /               (Longitudinal Health Graph:
+                      Ollama vision on CPU +          Observations, Timeline,
+                      MedCPT embeddings +             Medications, Conditions;
+                      BM25 + Chroma +                 question-focused graph
+                      BART-large-MNLI)                retrieval + conflicts)
     ↓
 PostgreSQL (Upload Metadata, Chat History, Claims, Audit Logs)
 ```
 
 RAG is hybrid, not vector-only: lexical (BM25) and semantic (Chroma) search
-handle passage retrieval, while a local graph layer (Neo4j) stores structured
-patient observations and precomputes trend deltas for arithmetic verification.
+handle passage retrieval, while a third leg queries a local graph (Neo4j) of structured
+patient observations: it links the question to metrics, medications and conditions,
+follows one hop between them (a statin to the lipid panel), returns full histories with
+overall change, and surfaces conflicting records. Trend deltas are precomputed for
+arithmetic verification.
 
 **Key design principle**: All data stays local. No cloud APIs, no external LLM calls.
 
@@ -57,10 +60,12 @@ patient observations and precomputes trend deltas for arithmetic verification.
 ## 🚀 Quick Start
 
 ### Requirements
-- Python 3.11+, Node.js 20+
-- 8GB RAM, GPU optional (NVIDIA GTX 3060+ recommended; CPU execution fully supported)
-- Docker & Docker Compose
-- ~20GB disk space (for models + data)
+- Python 3.12, Node.js 20+, Docker & Docker Compose
+- **GPU variant** (default when an NVIDIA GPU is found): an NVIDIA GPU with 8GB of VRAM, 16GB RAM
+- **CPU variant** (any laptop without a GPU): 16GB RAM recommended; slower and reads documents with an Ollama
+  vision model instead of lift — see **[docs/CPU_SETUP.md](docs/CPU_SETUP.md)** for setup, measured timings and limits
+- [Ollama](https://ollama.com) running on the host with `medgemma:4b` pulled (`ollama pull medgemma:4b`)
+- ~20GB disk space (GPU variant: lift alone is 18GB; CPU variant: ~10GB)
 
 ### Installation
 
@@ -73,9 +78,10 @@ cd PHIRE
 cp .env.example .env
 bash scripts/setup.sh
 
-# Start all services (PostgreSQL, Neo4j, Backend, Frontend). Builds, enables the GPU if an NVIDIA runtime
-# is present, uses the Ollama already running on your host (or starts a bundled one if there is none),
-# and waits until the backend is healthy. Always uses the root .env.
+# Start all services (PostgreSQL, Neo4j, Backend, Frontend). Builds the GPU variant if an NVIDIA runtime
+# is present, otherwise the CPU variant (force with PHIRE_VARIANT=gpu|cpu); uses the Ollama already
+# running on your host (or starts a bundled one if there is none); waits until the backend is healthy.
+# Always uses the root .env.
 bash scripts/run.sh
 
 # One-time: seed the public reference corpus (MedlinePlus/PubMed/USDA; needs network)
@@ -88,13 +94,13 @@ curl -X POST http://localhost:8000/api/health
 ### First Use
 
 1. **Dashboard**: Navigate to `http://localhost:3000` to see your health overview.
-2. **Upload Records**: Go to `http://localhost:3000/documents` and upload a PDF or scanned lab report.
+2. **Upload Records**: Go to `http://localhost:3000/documents` and upload a PDF or scanned lab report. If no date can be found in a document, the page asks you for it (it never silently assumes today).
 3. **Ask Questions**: Open `http://localhost:3000/chat` and ask "What was my most recent LDL level?".
 4. **Inspect Evidence**: Expand the Claim Verification audit trail to view exact confidence scores and source citations.
 
 Both long waits show live progress over Server-Sent Events: uploads display each ingestion stage (loading the vision model, reading the document, indexing, saving to your timeline), and chat displays each pipeline stage (reading records, searching evidence, drafting, verifying claim *i* of *n*).
 
-> If another app already uses port 3000, 7687 or 5433, run PHIRE on alternates — see [docs/BACKEND_HANDOFF.md §9.3](docs/BACKEND_HANDOFF.md).
+> Ports come from your `.env` (`FRONTEND_PORT`, `BACKEND_PORT`, …); if another app already uses 3000 or 7687, change them there — see [docs/BACKEND_HANDOFF.md §9.3](docs/BACKEND_HANDOFF.md).
 
 ---
 
@@ -119,17 +125,19 @@ It clears, using the targets in `backend/.env`: PostgreSQL (`documents`, `chat_m
 - [x] Evidence attribution (claim-level, with exact source citations)
 - [x] Claim verification / hallucination detection (BART-large-MNLI, abstains below confidence threshold)
 - [x] Longitudinal reasoning (Neo4j-backed patient fact graph: current state + trend deltas)
+- [x] Graph retrieval: question-focused entity linking, one-hop expansion (medication/condition → metric), full-history summaries, conflicting-record detection (`ml/graph/graph_retrieval.py`)
+- [x] Missing document dates are asked for in the UI (extraction saved; facts and search chunks rebuilt at the user's date)
+- [x] CPU-only variant: Ollama vision extraction, CPU PyTorch image (~2.7GB), auto-selected by `scripts/run.sh` (see docs/CPU_SETUP.md)
 - [x] SSE live progress for document ingestion and chat (`GET /api/documents/{id}/events`, `POST /api/chat/stream`)
 - [x] LIFT/CHAT GPU modes so lift and the chat models share an 8GB GPU by swapping (`backend/app/services/gpu_modes.py`)
-- [x] Document ingestion (unified single-pass visual extraction via `datalab-to/lift` 9.7B VLM with 4-bit NF4 on CUDA applied in `LiftExtractor`, ~6.5GiB peak on an 8GB GPU, and CPU fallback)
-- [x] Backend API integration (FastAPI with 8 routers, HIPAA audit logging, GPU lock)
+- [x] Document ingestion: single-pass visual extraction via `datalab-to/lift` 9.7B VLM (4-bit NF4, ~6.5GiB peak on an 8GB GPU), or an Ollama vision model on CPU-only machines (`PHIRE_EXTRACTOR=auto|lift|ollama`)
+- [x] Backend API integration (FastAPI with 9 routers, HIPAA audit logging, LIFT/CHAT GPU modes)
 - [x] Frontend UI (Next.js 16 App Router: Dashboard, Chat, Documents, Search)
 
 **Extended (post-core)**
 - [ ] Fitness recommendations (HAR model)
 - [ ] Nutrition recommendations (meal planner)
 - [ ] Wearable integration
-- [ ] Multi-hop graph-RAG retrieval
 - [ ] FHIR-compliant representation
 
 See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete feature checklist.
@@ -139,8 +147,8 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 ## 🛠️ Tech Stack
 
 - **Frontend**: Next.js 16, React 19, TypeScript, TailwindCSS, Lucide Icons, Recharts
-- **Backend**: FastAPI, Python 3.11+, SQLAlchemy, Alembic, PostgreSQL
-- **LLM & VLM**: Ollama (`medgemma:4b` for chat), `datalab-to/lift` (9.7B parameter schema-guided VLM for single-pass visual document extraction)
+- **Backend**: FastAPI, Python 3.12, SQLAlchemy, Alembic, PostgreSQL
+- **LLM & VLM**: Ollama (`medgemma:4b` for chat, and for document extraction on CPU-only machines), `datalab-to/lift` (9.7B parameter schema-guided VLM for single-pass visual document extraction on GPU machines)
 - **Embeddings / Reranking**: `ncbi/MedCPT` (dual encoder + cross-encoder)
 - **Claim verification**: `facebook/bart-large-mnli` (NLI entailment/contradiction scoring)
 - **Vector DB**: Chroma (in-process)
@@ -155,7 +163,9 @@ See [docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md) for the complete featur
 - **[docs/BACKLOG.md](docs/BACKLOG.md)** - Known gaps, tech debt, and open design questions across all subsystems
 - **[docs/API_REFERENCE.md](docs/API_REFERENCE.md)** - Full request/response reference for every backend endpoint
 - **[docs/FRONTEND_HANDOFF.md](docs/FRONTEND_HANDOFF.md)** - Frontend UI architecture, page inventory, and active tasks
-- **[docs/BACKEND_HANDOFF.md](docs/BACKEND_HANDOFF.md)** - Backend integration history, verification tests, and architecture
+- **[docs/BACKEND_HANDOFF.md](docs/BACKEND_HANDOFF.md)** - Backend integration history, verification tests, architecture, Docker and GPU details
+- **[docs/CPU_SETUP.md](docs/CPU_SETUP.md)** - Running on a laptop without an NVIDIA GPU (setup, measured timings, limits)
+- **[docs/GRAPH_SCHEMA_ROADMAP.md](docs/GRAPH_SCHEMA_ROADMAP.md)** - What the Longitudinal Health Graph does today and what is deliberately deferred
 - **[docs/FEATURES_ALIGNED.md](docs/FEATURES_ALIGNED.md)** - Complete feature roadmap aligned to NLP-06 specifications
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Roles, work division, detailed task breakdown
 - **[GET_STARTED.md](GET_STARTED.md)** - First-day setup & onboarding checklist
@@ -199,7 +209,7 @@ PHIRE is designed for **wellness and decision-support** purposes only:
 - ✅ Track trends in your health metrics
 - ❌ NOT for diagnosis or treatment decisions
 - ❌ NOT a replacement for talking to healthcare professionals
-- ❌ NOT for medical emergencies (call 911 or your doctor)
+- ❌ NOT for medical emergencies (contact your doctor or your local emergency number)
 
 ---
 

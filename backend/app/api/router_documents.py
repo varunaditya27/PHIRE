@@ -152,3 +152,35 @@ def get_document(document_id: uuid.UUID, db: Session = Depends(get_db)) -> Docum
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+@router.delete("/{document_id}", status_code=204)
+def delete_document(document_id: uuid.UUID, db: Session = Depends(get_db)) -> Response:
+    """Remove a document everywhere it was written: Chroma chunks, Neo4j facts,
+    the stored file, and its Postgres row.
+
+    Refused with 409 while it is still processing -- the background worker
+    would otherwise write chunks/facts for a document that no longer exists.
+    """
+    document = db.get(Document, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if document.status == DocumentStatus.PROCESSING.value:
+        raise HTTPException(status_code=409, detail="Document is still processing; try again when it finishes.")
+
+    # Errors propagate (500, row kept) instead of being swallowed like the
+    # best-effort rollback after a failed ingestion: a "deleted" document
+    # whose facts still answer chat would be a silent privacy failure, and
+    # keeping the row lets the user retry. The retriever needs the CHAT-group
+    # GPU models, hence gpu_mode.
+    from ml.graph.deletion import delete_document_facts
+
+    with gpu_mode(CHAT):
+        get_retriever().delete_by_document_id(str(document.id))
+    with new_graph_client() as client:
+        delete_document_facts(client, str(document.id))
+    Path(document.storage_path).unlink(missing_ok=True)
+    db.delete(document)
+    db.commit()
+    progress.forget(str(document_id))
+    return Response(status_code=204)

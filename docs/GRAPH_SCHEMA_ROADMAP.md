@@ -35,7 +35,7 @@ throw documents at an LLM and ask it to invent a graph").
 
 ## 2. What's actually built and working right now
 
-**Updated 2026-09-09** — everything in this section is shipped and
+**Updated 2026-10-05** — everything in this section is shipped and
 live-tested (`ml/graph/`, `ml/rag/ingest/lift_schema.py`, `ml/rag/ingest/lift_extractor.py`):
 
 ```
@@ -68,6 +68,10 @@ are in place — this is the schema `ml/graph/observations.py`,
   trend deltas (`get_trend_facts`) that `ml/chains/qa_chain.py` uses to
   label a matching claim `DERIVED` rather than asking NLI to do the
   arithmetic itself. All wired into the live chat pipeline, not standalone.
+- **Graph retrieval** (§3f): `ml/graph/graph_retrieval.py` links a question to metrics, medications and
+  conditions, follows one hop between them, and returns histories, change summaries and conflicting records.
+- **Composite readings**: `ml/graph/composite_readings.py` splits blood pressure (+ pulse) and converts Snellen
+  acuity and feet-inches height into numeric observations.
 - Single well-known `Patient` node (`"self"`) — matches PHIRE's actual
   single-user-per-local-instance model, not a multi-tenant assumption.
 - Idempotent writes (`MERGE` on a stable id) — re-ingesting a document
@@ -92,6 +96,11 @@ different dates, and conflating them corrupts trend analysis.
 tries to parse a clinical date out of the document text, falling back to
 "today" only if none is found — that's already the right instinct, just
 not yet a formally named/consistent field across node types.
+
+**Date handling today**: when no clinical date can be extracted, the backend no longer silently uses "today":
+it stores a provisional date, flags the document `needs_date`, and the UI asks the user for the real one
+(`PUT /api/documents/{id}/date` rebuilds the document's facts at that date). The formal clinical-vs-recorded
+field split described below is still a separate pass.
 
 **Cost to formalize**: trivial — rename/confirm `effective_date` (clinical)
 vs. `recorded_date` (ingestion) consistently across Observation/
@@ -189,31 +198,48 @@ build it when there's a real symptom-tracking feature to attach it to.
 the current schema can't satisfy. Add node types one at a time, driven by
 that need, not as a batch.
 
-### 3f. Multi-hop graph-RAG retrieval (LightRAG-style) — **not yet implemented, outstanding work, not deferred**
+### 3f. Graph retrieval (multi-hop, longitudinal, contradiction-aware) — **implemented (2026-10-05), deterministic traversal**
 
-**What it is**: `ml/rag/retriever.py`'s own module docstring describes
-retrieval as three-way — lexical (BM25), semantic (Chroma), and graph
-traversal — but only the first two legs exist. Everything built in
-`ml/graph/` today is single-patient fact *lookup* (current value per
-metric, latest-vs-previous trend delta), read directly by
-`ml/graph/patient_context.py` — there is no traversal of relationships
-*between* entities at query time (e.g. "connect my rising LDL trend to
-the specific guideline passage that explains the risk" as one hop, not
-two separate lookups glued together in the prompt).
+**What it is**: the third retrieval leg described in `ml/rag/retriever.py`'s docstring and
+`docs/DATASETS_AND_GRAPH_RAG.md`, beside BM25 and Chroma. `ml/graph/graph_retrieval.py` replaces
+"dump every stored fact into the prompt" with a question-focused traversal of the Neo4j graph:
 
-**Distinction from other deferred items in this doc**: sections 3b/3c/3e
-above are deferred because the problem they solve doesn't exist yet at
-PHIRE's current single-patient, single-pipeline scale. Multi-hop
-retrieval is different — `README.md` and `docs/DATASETS_AND_GRAPH_RAG.md`
-already describe PHIRE's RAG architecture as including this leg, so it's
-not speculative future scope, it's a committed piece of the described
-architecture that hasn't been built yet. LightRAG itself (the specific
-library) was evaluated and not adopted as a dependency — see
-`docs/DATASETS_AND_GRAPH_RAG.md` and `docs/OPEN_SOURCE_TOOLS.md` — but
-that's a decision about *how* to build this leg, not *whether* to.
+1. **Entity linking** — whole-word match of the question against metric names/aliases (via
+   `metric_resolver.phrasings_for`; qualified parts such as "Blood Pressure (Systolic)" follow their base
+   name), medication names and drug-class words ("statin"), and condition names. Very short aliases ("k",
+   "na") are ignored so they cannot collide with ordinary words; general cues ("my medications", "my
+   conditions") link all of that kind.
+2. **One hop** — `ml/graph/relations.py` is a small curated "followed through" table (statin → lipid panel,
+   diabetes → HbA1c/glucose, antihypertensive → blood pressure, ...): a linked drug or condition pulls in the
+   metrics it is monitored through, and a linked metric pulls in the drugs/conditions that follow it ("why is
+   my LDL high?" → the statin and hypercholesterolemia). These are retrieval-routing hints, **not** medical
+   assertions — every claim is still verified against the stored records.
+3. **Longitudinal facts** — the full history of each linked metric (not just latest-vs-previous), an overall
+   change summary across all readings ("3 readings from … to …: … (overall a decrease of … ; lowest …,
+   highest …)"), and "<medication/condition> … is followed through <metric> (<series>)" link sentences.
+4. **Contradiction detection** (`ml/graph/conflicts.py`) — two *different documents* asserting different values
+   for the same metric / medication dose / condition status on the **same clinical date**. A later value is a
+   trend, not a conflict. Always computed for linked entities, and for everything when the question asks
+   about disagreement; if there are none, the context says so explicitly ("No conflicting records were found…")
+   so the model has something truthful to cite.
 
-**Status**: not started. No LightRAG-style entity/relationship graph, no
-multi-hop query planning, no code in `ml/` attempts this today.
+Every returned sentence carries the list of source files it rests on, and `QAChain` puts them in the
+verification pool as `patient_record` / `patient_derived` chunks, so a claim built on them is cited to **all**
+the documents involved (a trend lists both readings' files). When nothing in the question links, the function
+returns `None` and chat keeps the previous full-context behavior. Verified live on real data: "How is my
+statin working?" linked Atorvastatin → the four lipid metrics (HbA1c untouched) and answered with trend claims
+citing both source documents.
+
+**Why not LightRAG**: unchanged from `docs/DATASETS_AND_GRAPH_RAG.md` — an LLM-built entity graph would add a
+dependency and an extra place for patient text to be re-interpreted by a model; the relationships needed here
+(dates, values, documents, a drug-to-metric table) are already structured, so traversal is exact and every
+output is traceable to stored rows.
+
+**Not done / known limits**: the link table is small and hand-curated (add an entry when a real question needs
+it); there is still no single traversal that joins the patient graph to a *guideline passage* in Chroma (the two
+legs are combined in the prompt, not walked as one path — the "multi-hop across both layers" case noted in §3d);
+the conflict rule only catches same-date disagreements; medications carry the document's date, not a start
+date, so "relative to my medication" is a co-located timeline, not a before/after dosing analysis.
 
 ---
 
@@ -223,7 +249,7 @@ multi-hop query planning, no code in `ml/` attempts this today.
 |---|---|---|
 | FHIR-ish field naming | **Done** | Shipped — see §2 |
 | Typed Medication/Condition nodes | **Done** | Shipped, live-tested — see §2 |
-| Multi-hop graph-RAG retrieval (LightRAG-style) | **Not implemented — outstanding, must be built** | Third retrieval leg described in the architecture docs but never built; see §3f |
+| Graph retrieval: multi-hop / longitudinal / contradiction (deterministic traversal, no LightRAG) | **Done** (2026-10-05) | `ml/graph/graph_retrieval.py`, `relations.py`, `conflicts.py`; see §3f for scope and limits |
 | Effective vs. recorded date, formalized | **Separate pass, later** (decided 2026-08-16) | Not bundled into current work; revisit with more real ingested data |
 | Claim→evidence as graph edges | **Next trigger in line** (updated 2026-08-16) | Persisted chat history confirmed coming soon — design both together |
 | RxNorm medication normalization | **Defer** | No cross-document naming drift observed yet; cheap when needed |

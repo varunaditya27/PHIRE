@@ -20,8 +20,9 @@ phire/
 │   ├── OPEN_SOURCE_TOOLS.md        # Tools catalog: adopted + evaluated candidates
 │   ├── DATASETS_AND_GRAPH_RAG.md   # Finalized datasets/models + graph RAG architecture
 │   ├── GRAPH_SCHEMA_ROADMAP.md     # Longitudinal Health Graph: current schema + deferred work
-│   ├── PDF_INGESTION_ROADMAP.md    # Scanned-PDF ingestion gap: decided design, not yet built
+│   ├── PDF_INGESTION_ROADMAP.md    # Historical: the superseded scanned-PDF router design (replaced by lift / Ollama vision extraction)
 │   ├── ML_HANDOFF_FOR_ANIKA.md     # ml/ -> backend/ integration contract
+│   ├── CPU_SETUP.md                # Running on a laptop without an NVIDIA GPU (setup, timings, limits)
 │   └── RESEARCH_LOG.md             # Dated findings/decisions for paper drafting
 │
 ├── backend/                         # ANIKA OWNS — see backend/README.md
@@ -39,8 +40,9 @@ phire/
 │       ├── api/
 │       │   ├── __init__.py
 │       │   ├── router_health.py      # POST /api/health, GET /api/ping
-│       │   ├── router_chat.py        # POST /api/chat, POST /api/chat/stream (SSE)
-│       │   ├── router_documents.py   # POST /api/documents/upload, /process, GET /{id}, DELETE /{id}, GET /{id}/events (SSE)
+│       │   ├── router_chat.py        # POST /api/chat, POST /api/chat/stream (SSE), GET /api/chat/messages
+│       │   ├── router_documents.py   # GET /api/documents, POST /upload, /process, GET /{id}, PUT /{id}/date, DELETE /{id}
+│       │   ├── router_document_events.py # GET /api/documents/{id}/events (SSE)
 │       │   ├── router_observations.py# GET /api/observations, GET /api/timeline
 │       │   ├── router_search.py      # GET /api/search/evidence
 │       │   ├── router_evidence.py    # POST /api/evidence/retrieve, POST /api/evidence/verify
@@ -62,9 +64,9 @@ phire/
 │       │
 │       ├── services/
 │       │   ├── __init__.py
-│       │   ├── document_processor.py  # Background ingestion & transactional rollback
+│       │   ├── document_processor.py  # Background ingestion, transactional rollback, redate (missing-date fix)
 │       │   ├── graph_reader.py        # Cypher queries for timeline & observations
-│       │   ├── ml_singletons.py       # Lazy cached ML models & the process-wide GPU_LOCK
+│       │   ├── ml_singletons.py       # Lazy cached ML models (get_extractor: lift or Ollama vision) & the process-wide GPU_LOCK
 │       │   ├── gpu_modes.py           # gpu_mode(LIFT|CHAT): mutually exclusive GPU residency groups
 │       │   ├── progress.py            # In-memory per-document event channel behind SSE
 │       │   ├── evidence_search.py     # Shared retrieve→rerank→scored citations (search + /evidence/retrieve)
@@ -74,6 +76,7 @@ phire/
 │       └── utils/
 │           ├── __init__.py
 │           ├── validators.py       # Upload size & MIME validation
+│           ├── sse.py              # Server-Sent Events framing shared by the streaming routes
 │           ├── encryption.py       # Fernet symmetric encryption helper
 │           └── constants.py        # Enums & MIME types
 │
@@ -112,7 +115,9 @@ phire/
 │
 ├── ml/                              # VARUN OWNS — see ml/README.md
 │   ├── README.md                    # Architecture, quick start, model choices, feature status
-│   ├── requirements.txt
+│   ├── requirements.txt            # CPU-safe base
+│   ├── requirements-lift.txt       # GPU-only extra: lift, bitsandbytes, accelerate
+│   ├── requirements-experiments.txt # Only for re-running benchmarks
 │   ├── __init__.py
 │   ├── local_only.py                # Universal localhost address validator
 │   │
@@ -124,7 +129,10 @@ phire/
 │   │   ├── ingest/                 # Document & reference ingestion pipeline
 │   │   │   ├── ingest_patient_document.py  # Patient PDF/image ingestion coordinator
 │   │   │   ├── run_ingest.py               # Reference ingestion runner (manifest generator)
-│   │   │   ├── lift_extractor.py           # datalab-to/lift 9.7B VLM extractor (4-bit NF4 + CPU)
+│   │   │   ├── lift_extractor.py           # datalab-to/lift 9.7B VLM extractor (4-bit NF4; GPU only)
+│   │   │   ├── ollama_extractor.py         # Ollama vision-model extractor for CPU-only machines (same schema)
+│   │   │   ├── text_cleanup.py             # Sentence-spacing repair shared by ingestion and reformat_corpus
+│   │   │   ├── reformat_corpus.py          # Offline upgrade of stored USDA/MedlinePlus chunks to the current text format
 │   │   │   ├── lift_schema.py              # Clinical document schema & payload validator
 │   │   │   ├── chunk_synthesizer.py        # Option A declarative clinical sentence synthesizer
 │   │   │   ├── patient_documents.py        # Document format router via Lift
@@ -137,8 +145,8 @@ phire/
 │   │
 │   ├── claims/
 │   │   ├── __init__.py
-│   │   ├── extractor.py            # Atomic claim extraction via medgemma:4b / qwen3.5:9b
-│   │   ├── verifier.py             # BART-large-MNLI claim verifier
+│   │   ├── extractor.py            # Atomic claim extraction via medgemma:4b
+│   │   ├── verifier.py             # BART-large-MNLI claim verifier (batched, fp16 on CUDA)
 │   │   ├── confidence.py           # NLI confidence calculation
 │   │   └── experiments/            # NLI model benchmark & candidate evaluations
 │   │
@@ -149,6 +157,10 @@ phire/
 │   │   ├── document_dates.py        # Day-first clinical date parser & ISO normalizer
 │   │   ├── metric_resolver.py       # Canonical metric normalization dictionary
 │   │   ├── patient_context.py       # Graph read queries & trend delta precomputation
+│   │   ├── graph_retrieval.py       # Question-focused retrieval: entity linking, one hop, histories, conflicts
+│   │   ├── relations.py             # Curated drug/condition -> metric table (retrieval hints)
+│   │   ├── conflicts.py             # Conflicting-record detection (same fact, same date, different documents)
+│   │   ├── composite_readings.py    # BP(+pulse), Snellen acuity, feet-inches height -> numeric observations
 │   │   ├── deletion.py              # Ingestion rollback node/edge cleanup
 │   │   └── experiments/            # Extraction model benchmark & results
 │   │
@@ -167,23 +179,24 @@ phire/
 │   │   ├── __init__.py
 │   │   └── qa_chain.py             # End-to-end Reverse-RAG orchestrator
 │   │
-│   └── tests/                       # ~227 pytest tests (220 pass without live GPU infra; live/integration ones need Ollama/Neo4j/free VRAM). conftest.py defaults lift to mock mode; test_gpu_modes.py / test_progress.py cover backend services
+│   └── tests/                       # 312 pytest tests with Neo4j reachable (+7 live/GPU-bound ones to run with the backend stopped). conftest.py defaults lift to mock mode; also holds the backend's service and HTTP-endpoint tests
 │
 ├── evaluation/                      # SHASHWATI OWNS (Planned / Scheduled)
 │   └── (ArchEHR-QA & MedHallBench benchmarks)
 │
 ├── docker/
-│   ├── Dockerfile.backend          # Backend image (python 3.12; backend + ml dependencies; non-root)
+│   ├── Dockerfile.backend          # Backend image (python 3.12; non-root; ARG VARIANT=gpu|cpu)
 │   ├── Dockerfile.backend.dockerignore
 │   ├── backend-entrypoint.sh       # alembic upgrade head, then uvicorn (single worker)
 │   ├── Dockerfile.frontend         # Next.js multi-stage build (NEXT_PUBLIC_API_URL is a build arg)
 │   ├── docker-compose.yml          # Full stack: Postgres, Neo4j, Backend, Frontend; ollama / ingest / proxy profiles (host Ollama by default)
 │   ├── docker-compose.gpu.yml      # NVIDIA GPU reservations layered on by scripts/run.sh
+│   ├── docker-compose.cpu.yml      # CPU variant: CPU-only PyTorch image, Ollama vision extractor, longer timeouts
 │   └── nginx.conf.template         # Optional host-networked reverse proxy (templated ports, 25MB uploads, SSE-safe)
 │
 ├── scripts/
-│   ├── setup.sh                    # Shared environment & venv setup
-│   ├── run.sh                      # Full-stack docker compose startup (GPU auto-detect, health wait; `down` to stop)
+│   ├── setup.sh                    # Shared environment & venv setup (GPU: base+lift; no GPU: CPU PyTorch, no lift)
+│   ├── run.sh                      # Full-stack docker compose startup (GPU/CPU variant auto-detect, health wait; `down` to stop)
 │   ├── run_backend.sh              # Local FastAPI runner with Alembic migrations & PYTHONPATH
 │   ├── run_frontend.sh             # Local Next.js runner
 │   └── reset_data.py               # Wipe patient data from Postgres/Neo4j/Chroma/uploads (see README)
@@ -192,7 +205,7 @@ phire/
 │   ├── chroma/                     # Chroma persistent vector store
 │   ├── demo/                       # Demo patient records
 │   ├── benchmarks/                 # Benchmark datasets
-│   └── ingest_manifest.json        # Reference corpus metadata
+│   └── ingest_manifest.json        # Reference corpus run log (written by run_ingest.py; gitignored)
 │
 ├── archive/                         # Legacy research syntheses (read-only)
 ├── .env.example
